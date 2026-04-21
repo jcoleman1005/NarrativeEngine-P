@@ -73,3 +73,6 @@ build-server.mjs
 
 # One-time migration scripts
 server/scripts/migrateEmbeddings.js
+
+# Debug / stabilization config
+stabs.json
