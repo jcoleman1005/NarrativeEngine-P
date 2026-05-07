@@ -101,10 +101,20 @@ export type DivergenceEntry = {
     resolved?: boolean;
     source: 'auto' | 'manual';
     parseError?: boolean;
+    reviewFlag?: boolean;
+};
+
+export type PrunedEntry = {
+    originalEntry: DivergenceEntry;
+    prunedAt: number;
+    chapterId: string;
+    verdict: 'auto_pruned' | 'user_deleted_review';
+    reason: string;
 };
 
 export type DivergenceRegister = {
     entries: DivergenceEntry[];
+    prunedLog: PrunedEntry[];
     lastUpdatedSceneId: string;
     lastUpdatedAt: number;
     version: number;

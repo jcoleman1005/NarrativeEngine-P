@@ -1,14 +1,16 @@
-import type { EndpointConfig, DivergenceEntry, DivergenceRegister, DivergenceCategory, ArchiveIndexEntry, ChatMessage } from '../types';
+import type { EndpointConfig, DivergenceEntry, DivergenceRegister, DivergenceCategory, ArchiveIndexEntry, ArchiveChapter, ChatMessage, PrunedEntry } from '../types';
 import { callLLM } from './callLLM';
 import { uid } from '../utils/uid';
 import { countTokens } from './tokenizer';
 import { extractJson } from './payloadBuilder';
 import { stripThinkTags } from '../utils/stripThink';
+import { toast } from '../components/Toast';
 
 export const IMPORTANCE_GATE = 7;
 
 export const EMPTY_REGISTER: DivergenceRegister = {
     entries: [],
+    prunedLog: [],
     lastUpdatedSceneId: '',
     lastUpdatedAt: 0,
     version: 1,
@@ -365,6 +367,7 @@ export function mergeEntries(
 
     return {
         entries: merged,
+        prunedLog: register.prunedLog ?? [],
         lastUpdatedSceneId: sceneId,
         lastUpdatedAt: Date.now(),
         version: register.version,
@@ -512,12 +515,114 @@ OUTPUT: JSON array of entries: [{ "category": "...", "subject": "...", "divergen
 
         return {
             entries: merged,
+            prunedLog: register.prunedLog ?? [],
             lastUpdatedSceneId: register.lastUpdatedSceneId,
             lastUpdatedAt: Date.now(),
             version: register.version + 1,
         };
     } catch (err) {
         console.warn('[DivergenceRegister] Compression failed:', err);
+        return register;
+    }
+}
+
+function repairTruncatedJson(str: string): string {
+    let s = str.trim();
+    const lastBrace = s.lastIndexOf('}');
+    const lastBracket = s.lastIndexOf(']');
+    const cut = Math.max(lastBrace, lastBracket);
+    if (cut !== -1) {
+        s = s.substring(0, cut + 1).trim();
+    }
+    if (!s.endsWith(']')) s += ']';
+    s = s.replace(/,\s*]/g, ']');
+    s = s.replace(/,\s*}/g, '}');
+    s = s.replace(/}\s*\{/g, '},{');
+    return s;
+}
+
+export async function mergeSimilarEntries(
+    provider: EndpointConfig,
+    register: DivergenceRegister
+): Promise<DivergenceRegister> {
+    if (register.entries.length === 0) return register;
+
+    const entryLines = register.entries.map(e =>
+        `${e.id} | ${e.category} | ${e.subject}: ${e.divergence} [Scene #${e.sceneRef}]`
+    ).join('\n');
+
+    const prompt = `Merge adjacent or same-subject divergence entries into fewer, denser entries. This is a CAMPAIGN TRUTH register — not a story log. Clusters of micro-beat entries about the same character/subject should collapse into one entry capturing the final state.
+
+ENTRIES:
+${entryLines}
+
+RULES:
+- Identify clusters sharing the same subject. Group them.
+- For each cluster, keep only the entry(s) that represent the CURRENT final state. If 7 entries trace an emotional arc, output 1 entry summarizing the arc's outcome.
+- Merge transient micro-beats into their parent entry. "Bram was nervous" + "Bram's hands dropped" + "Bram asked hopefully" → "Bram is emotionally fragile but drawn to Soren's encouragement"
+- Drop entries fully superseded: if entry A says "shallow reserves" and entry B says "true depth concealed," keep B, drop A.
+- Preserve ALL proper nouns. Keep the earliest sceneRef in the cluster.
+- If only 1 entry exists for a subject, keep it as-is unless it's clearly a transient moment (one-time state no longer true).
+- Output EVERY entry from the input. For entries you merge, omit them and add a new merged entry. For entries you keep unchanged, include them verbatim.
+
+OUTPUT: JSON array of entries. List ALL entries that should remain in the register — kept originals + new merged entries. Drop entries that are consumed by a merge.
+[{ "category": "...", "subject": "...", "divergence": "...", "sceneRef": "...", "importance": <number>, "linkedSceneIds": ["..."], "source": "auto" }]`;
+
+    try {
+        const entryCount = register.entries.length;
+        const outputTokens = Math.min(64000, Math.max(8000, entryCount * 120));
+        const raw = await callLLM(provider, prompt, { priority: 'low', maxTokens: outputTokens });
+        const cleaned = stripReasoning(raw);
+        const jsonStr = extractJson(cleaned);
+
+        let merged: Array<Partial<DivergenceEntry>> = [];
+        try {
+            merged = JSON.parse(jsonStr) as typeof merged;
+            if (!Array.isArray(merged)) merged = [];
+        } catch {
+            const repaired = repairTruncatedJson(jsonStr);
+            try {
+                merged = JSON.parse(repaired) as typeof merged;
+                if (!Array.isArray(merged)) merged = [];
+            } catch {
+                console.warn('[DivergenceMerge] JSON repair failed, raw output:', cleaned.slice(0, 500));
+            }
+        }
+
+        if (!Array.isArray(merged) || merged.length === 0) {
+            toast.error('Merge produced no entries — register unchanged. The model may have exceeded output length.');
+            return register;
+        }
+
+        const newEntries: DivergenceEntry[] = merged.map(ce => ({
+            id: `div_${uid()}`,
+            category: ce.category || 'entity_state',
+            subject: ce.subject || '',
+            divergence: ce.divergence || '',
+            sceneRef: ce.sceneRef || '000',
+            linkedSceneIds: ce.linkedSceneIds || [ce.sceneRef || '000'],
+            importance: ce.importance ?? 5,
+            source: ce.source || 'auto',
+        }));
+
+        newEntries.sort((a, b) => parseInt(a.sceneRef) - parseInt(b.sceneRef));
+
+        const oldCount = register.entries.length;
+        const prunedDuringMerge = oldCount - merged.length;
+
+        console.log(`[DivergenceMerge] ${oldCount} entries → ${newEntries.length} entries (${prunedDuringMerge} consumed by merges)`);
+        toast.info(`Merged ${oldCount} entries → ${newEntries.length} entries`);
+
+        return {
+            entries: newEntries,
+            prunedLog: register.prunedLog ?? [],
+            lastUpdatedSceneId: register.lastUpdatedSceneId,
+            lastUpdatedAt: Date.now(),
+            version: register.version + 1,
+        };
+    } catch (err) {
+        console.warn('[DivergenceMerge] Merge failed, register unchanged:', err);
+        toast.error(`Merge failed: ${(err as Error).message || 'Unknown error'}`);
         return register;
     }
 }
@@ -540,4 +645,197 @@ OUTPUT JSON only: { "category": "<canon_override|world_change|entity_state|playe
         console.warn('[DivergenceRegister] Manual structuring failed:', err);
         return null;
     }
+}
+
+export function getEntriesForSceneRange(
+    register: DivergenceRegister,
+    sceneRange: [string, string]
+): DivergenceEntry[] {
+    const startNum = parseInt(sceneRange[0], 10);
+    const endNum = parseInt(sceneRange[1], 10);
+    return register.entries.filter(e => {
+        const refNum = parseInt(e.sceneRef, 10);
+        return refNum >= startNum && refNum <= endNum;
+    });
+}
+
+function buildPrunePrompt(
+    chapter: ArchiveChapter,
+    entries: DivergenceEntry[],
+    allChapters: ArchiveChapter[]
+): string {
+    const npcSet = new Set<string>();
+    for (const ch of allChapters) {
+        for (const npc of (ch.npcs ?? [])) {
+            npcSet.add(npc.toLowerCase());
+        }
+    }
+    const recurringNpcs = [...npcSet];
+
+    const entryLines = entries.map(e =>
+        `${e.id} | ${e.category} | ${e.subject}: ${e.divergence} [Scene #${e.sceneRef}]`
+    ).join('\n');
+
+    const threadLines = (chapter.unresolvedThreads ?? []).length > 0
+        ? chapter.unresolvedThreads.join('\n- ')
+        : '(none)';
+
+    return `You are pruning a campaign divergence register after a chapter was sealed. The register is for PERSISTENT CAMPAIGN TRUTH — facts that would break future scenes if the AI didn't know them. It is NOT a story transcript or a log of good moments. Prune aggressively.
+
+CHAPTER: "${chapter.title}" (Scenes ${chapter.sceneRange[0]}-${chapter.sceneRange[1]})
+SUMMARY: ${chapter.summary || '(no summary yet)'}
+UNRESOLVED THREADS:
+- ${threadLines}
+RECURRING NPCs ACROSS ALL CHAPTERS: ${recurringNpcs.join(', ') || '(none)'}
+
+ENTRIES FROM THIS CHAPTER:
+${entryLines}
+
+CLASSIFY each entry:
+- KEEP: If a scene 100 turns from now referenced this without re-explaining it, the reader would be confused. Only permanent truths, lore rules, unresolved plot threads, and major relationship shifts.
+- PRUNE: Everything else. This should be the default. The archive index and vector search will surface story moments when they become relevant.
+- REVIEW: Only when a keep-or-prune decision hinges on information you don't have. Default to PRUNE if you can't articulate a specific future scene that needs this.
+
+WHAT TO KEEP:
+- Permanent world rules and lore that constrain future storytelling (magic systems, faction politics, historical facts)
+- Unresolved plot threads with named antagonists, mysteries, or ticking clocks
+- Major relationship status changes between recurring characters (alliances formed, betrayals, deaths)
+- New recurring characters being introduced with their core identity (name, role, one defining trait)
+- Active ongoing deceptions, dual identities, or hidden capabilities being maintained
+- Irreversible character transformations (lost limbs, gained powers, broken oaths)
+
+WHAT TO PRUNE (this is the default — apply these liberally):
+- Transient ambient details: what someone was wearing, how they were standing, the weather, candlelight
+- Play-by-play combat actions: who crawled where, who swung what, who dodged which attack
+- Single-scene emotional micro-beats: a character's expression shifting, a momentary silence, a loaded glance — unless it represents a MAJOR relationship status change
+- Destroyed props and scenery: broken teacups, shattered windows, toppled furniture
+- Scene-setting descriptions: architecture of rooms the party left, landscape features passed through
+- Any entry whose subject is a one-off object, weather event, or unnamed bystander
+- Intermediate states fully superseded by a later entry: if entry A says "X was wounded" and entry B says "X recovered," merge into one final-state entry or prune A
+- Atmospheric NPC mannerisms: how a guard captain looks tired, how a governess twitches — these are NOT campaign facts
+
+OUTPUT: JSON array only, no other text. List EVERY entry. Default to "prune" for anything that isn't clearly essential:
+[{ "id": "...", "verdict": "keep"|"prune"|"review", "reason": "short explanation" }]`;
+}
+
+export async function pruneChapterEntries(
+    provider: EndpointConfig,
+    chapter: ArchiveChapter,
+    register: DivergenceRegister,
+    allChapters: ArchiveChapter[]
+): Promise<DivergenceRegister> {
+    const chapterEntries = getEntriesForSceneRange(register, chapter.sceneRange);
+    if (chapterEntries.length === 0) return register;
+
+    const prompt = buildPrunePrompt(chapter, chapterEntries, allChapters);
+
+    try {
+        const outputTokens = Math.min(64000, Math.max(2000, chapterEntries.length * 60));
+        const raw = await callLLM(provider, prompt, { priority: 'low', maxTokens: outputTokens });
+        const cleaned = stripReasoning(raw);
+        const jsonStr = extractJson(cleaned);
+
+        let classifications: Array<{ id: string; verdict: 'keep' | 'prune' | 'review'; reason: string }> = [];
+        try {
+            classifications = JSON.parse(jsonStr) as typeof classifications;
+            if (!Array.isArray(classifications)) classifications = [];
+        } catch {
+            const lines = cleaned.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            for (const line of lines) {
+                const m = line.match(/\b(div_[a-zA-Z0-9_-]+)\b.*?\b(keep|prune[ds]?|review)\b/i);
+                if (m) {
+                    const rawVerdict = m[2].toLowerCase();
+                    const verdict: 'keep' | 'prune' | 'review' = rawVerdict.startsWith('prune') ? 'prune' : rawVerdict === 'review' ? 'review' : 'keep';
+                    classifications.push({ id: m[1], verdict, reason: 'Parsed from free-text response' });
+                }
+            }
+        }
+
+        const classMap = new Map(classifications.map(c => [c.id, c]));
+
+        const keptEntries: DivergenceEntry[] = [];
+        const newPruned: PrunedEntry[] = [];
+        const outsideEntries = register.entries.filter(e => {
+            const refNum = parseInt(e.sceneRef, 10);
+            return refNum < parseInt(chapter.sceneRange[0], 10) || refNum > parseInt(chapter.sceneRange[1], 10);
+        });
+
+        for (const entry of chapterEntries) {
+            const cls = classMap.get(entry.id);
+            if (!cls || cls.verdict === 'keep') {
+                keptEntries.push(entry);
+            } else if (cls.verdict === 'review') {
+                keptEntries.push({ ...entry, reviewFlag: true });
+            } else {
+                newPruned.push({
+                    originalEntry: entry,
+                    prunedAt: Date.now(),
+                    chapterId: chapter.chapterId,
+                    verdict: 'auto_pruned',
+                    reason: cls?.reason ?? 'Classified as prune during chapter seal',
+                });
+            }
+        }
+
+        const merged = [...outsideEntries, ...keptEntries];
+        merged.sort((a, b) => parseInt(a.sceneRef) - parseInt(b.sceneRef));
+
+        const existingPruned = register.prunedLog ?? [];
+
+        const keptCount = keptEntries.filter(e => !e.reviewFlag).length;
+        const reviewCount = keptEntries.filter(e => e.reviewFlag).length;
+        console.log(`[DivergencePrune] Chapter ${chapter.chapterId}: ${outsideEntries.length} outside, ${keptCount} kept, ${reviewCount} flagged for review, ${newPruned.length} pruned`);
+
+        toast.info(`Pruned ${newPruned.length} entries · ${keptCount} kept · ${reviewCount} flagged for review`);
+
+        return {
+            entries: merged,
+            prunedLog: [...existingPruned, ...newPruned],
+            lastUpdatedSceneId: register.lastUpdatedSceneId,
+            lastUpdatedAt: Date.now(),
+            version: register.version + 1,
+        };
+    } catch (err) {
+        console.warn('[DivergencePrune] Pruning failed, register unchanged:', err);
+        toast.error(`Divergence pruning failed: ${(err as Error).message || 'Unknown error'}`);
+        return register;
+    }
+}
+
+export function confirmReviewEntry(register: DivergenceRegister, entryId: string): DivergenceRegister {
+    const entries = register.entries.map(e =>
+        e.id === entryId ? { ...e, reviewFlag: false } : e
+    );
+    return { ...register, entries, lastUpdatedAt: Date.now() };
+}
+
+export function deleteReviewedEntry(register: DivergenceRegister, entryId: string): DivergenceRegister {
+    const entry = register.entries.find(e => e.id === entryId);
+    if (!entry) return register;
+
+    const entries = register.entries.filter(e => e.id !== entryId);
+    const newPruned: PrunedEntry = {
+        originalEntry: entry,
+        prunedAt: Date.now(),
+        chapterId: '',
+        verdict: 'user_deleted_review',
+        reason: 'User manually deleted after review',
+    };
+    const prunedLog = [...(register.prunedLog ?? []), newPruned];
+
+    return { ...register, entries, prunedLog, lastUpdatedAt: Date.now() };
+}
+
+export function restorePrunedEntry(register: DivergenceRegister, prunedIndex: number): DivergenceRegister {
+    const prunedLog = register.prunedLog ?? [];
+    if (prunedIndex < 0 || prunedIndex >= prunedLog.length) return register;
+
+    const restored = prunedLog[prunedIndex];
+    const entry: DivergenceEntry = { ...restored.originalEntry, reviewFlag: false };
+
+    const newLog = prunedLog.filter((_, i) => i !== prunedIndex);
+    const entries = [...register.entries, entry];
+    entries.sort((a, b) => parseInt(a.sceneRef) - parseInt(b.sceneRef));
+
+    return { ...register, entries, prunedLog: newLog, lastUpdatedAt: Date.now() };
 }

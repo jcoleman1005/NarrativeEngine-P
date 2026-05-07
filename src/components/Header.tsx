@@ -26,7 +26,7 @@ export function Header() {
     const handleExit = async () => {
         if (activeCampaignId) {
             await saveCampaignState(activeCampaignId, { context, messages, condenser });
-            if (divergenceRegister && divergenceRegister.entries.length > 0) {
+            if (divergenceRegister && (divergenceRegister.entries.length > 0 || (divergenceRegister.prunedLog ?? []).length > 0)) {
                 try {
                     const { saveDivergenceRegister } = await import('../store/campaignStore');
                     await saveDivergenceRegister(activeCampaignId, divergenceRegister);

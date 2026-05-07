@@ -1,6 +1,9 @@
 import { api } from '../../services/apiClient';
 import { generateChapterSummary } from '../../services/saveFileEngine';
 import { shouldAutoSeal } from '../../services/archiveChapterEngine';
+import { pruneChapterEntries } from '../../services/divergenceRegister';
+import { saveDivergenceRegister } from '../../store/campaignStore';
+import { useAppStore } from '../../store/useAppStore';
 import { toast } from '../Toast';
 import type { ArchiveChapter, EndpointConfig, ProviderConfig, GameContext } from '../../types';
 
@@ -67,6 +70,38 @@ async function generateChapterSummaryAsync(
     }
 }
 
+async function pruneChapterEntriesAsync(
+    campaignId: string,
+    chapter: ArchiveChapter,
+    provider: EndpointConfig | ProviderConfig | undefined
+) {
+    try {
+        if (!provider) return;
+
+        const liveRegister = useAppStore.getState().divergenceRegister;
+        if (!liveRegister || liveRegister.entries.length === 0) return;
+
+        const allChapters = await api.chapters.list(campaignId);
+        const freshChapter = allChapters.find(c => c.chapterId === chapter.chapterId);
+        const chapterForPrune = (freshChapter && (freshChapter.summary || freshChapter.unresolvedThreads?.length))
+            ? freshChapter
+            : chapter;
+
+        const pruned = await pruneChapterEntries(
+            provider as EndpointConfig | ProviderConfig,
+            chapterForPrune,
+            liveRegister,
+            allChapters
+        );
+
+        useAppStore.getState().setDivergenceRegister(pruned);
+        await saveDivergenceRegister(campaignId, pruned);
+        console.log(`[ChapterPrune] Pruned entries for sealed chapter ${chapter.chapterId}`);
+    } catch (err) {
+        console.warn('[ChapterPrune] Failed:', err);
+    }
+}
+
 export function useChapterSealing(deps: UseChapterSealingDeps) {
     const handleSealChapter = async (campaignId: string, title?: string, reason: string = 'manual') => {
         try {
@@ -93,7 +128,12 @@ export function useChapterSealing(deps: UseChapterSealingDeps) {
             const capturedHeaderIndex = deps.context.headerIndex;
             const capturedProvider = deps.getActiveSummarizerEndpoint?.()
                 ?? deps.getActiveStoryEndpoint();
-            generateChapterSummaryAsync(campaignId, result.sealedChapter, capturedHeaderIndex, capturedProvider, deps.setChapters);
+            await generateChapterSummaryAsync(campaignId, result.sealedChapter, capturedHeaderIndex, capturedProvider, deps.setChapters);
+            const updatedChapters = await api.chapters.list(campaignId);
+            const sealedWithSummary = updatedChapters.find(c => c.chapterId === result.sealedChapter.chapterId);
+            if (sealedWithSummary) {
+                await pruneChapterEntriesAsync(campaignId, sealedWithSummary, capturedProvider);
+            }
         } catch (err) {
             console.error('[SealChapter] Failed:', err);
             toast.error('Failed to seal chapter');

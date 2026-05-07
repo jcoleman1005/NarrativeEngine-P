@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileText, Edit2, RotateCcw, Check, X, RotateCw, List, Sparkles, Plus } from 'lucide-react';
+import { FileText, Edit2, RotateCcw, Check, X, RotateCw, List, Sparkles, Plus, Archive, Scissors, AlertTriangle, Combine } from 'lucide-react';
 import { toast } from './Toast';
 import type { DivergenceCategory, DivergenceEntry, DivergenceRegister, EndpointConfig } from '../types';
 import { QuestPanel } from './QuestPanel';
@@ -22,9 +22,14 @@ interface CondensedPanelProps {
     onAddManual?: () => void;
     provider?: EndpointConfig;
     contextLimit?: number;
+    onConfirmReviewEntry?: (id: string) => void;
+    onDeleteReviewedEntry?: (id: string) => void;
+    onRestorePrunedEntry?: (prunedIndex: number) => void;
+    onManualPrune?: () => Promise<void>;
+    onMergeSimilar?: () => Promise<void>;
 }
 
-type Tab = 'summary' | 'register';
+type Tab = 'summary' | 'register' | 'review' | 'pruned';
 
 export function CondensedPanel({
     condensedSummary,
@@ -41,12 +46,19 @@ export function CondensedPanel({
     onAddManual,
     provider,
     contextLimit = 8192,
+    onConfirmReviewEntry,
+    onDeleteReviewedEntry,
+    onRestorePrunedEntry,
+    onManualPrune,
+    onMergeSimilar,
 }: CondensedPanelProps) {
     const hasSummary = !!condensedSummary;
     const [isEditing, setIsEditing] = useState(false);
     const [draft, setDraft] = useState('');
     const [tab, setTab] = useState<Tab>(hasSummary ? 'summary' : 'register');
     const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
+    const [pruneLoading, setPruneLoading] = useState(false);
+    const [mergeLoading, setMergeLoading] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editCat, setEditCat] = useState<DivergenceCategory>('entity_state');
     const [editSubject, setEditSubject] = useState('');
@@ -54,7 +66,9 @@ export function CondensedPanel({
     const [editSceneRef, setEditSceneRef] = useState('');
 
     const entries = divergenceRegister?.entries ?? [];
+    const prunedLog = divergenceRegister?.prunedLog ?? [];
     const regTokens = divergenceRegister ? countRegisterTokens(divergenceRegister) : 0;
+    const reviewCount = entries.filter(e => e.reviewFlag).length;
 
     const startEdit = (e: DivergenceEntry) => {
         setEditingId(e.id);
@@ -99,6 +113,22 @@ export function CondensedPanel({
                             <List size={10} />
                             Register
                             {entries.length > 0 && <span className="text-[8px] bg-amber-500/30 px-1 rounded">{entries.length}</span>}
+                        </button>
+                        <button
+                            onClick={() => setTab('review')}
+                            className={`flex items-center gap-1 px-2 py-1 text-[9px] uppercase tracking-wider transition-colors ${tab === 'review' ? 'bg-amber-500/20 text-amber-400 font-bold' : 'text-text-dim hover:text-amber-400'}`}
+                        >
+                            <AlertTriangle size={10} />
+                            Review
+                            {reviewCount > 0 && <span className="text-[8px] bg-red-500/40 px-1 rounded">{reviewCount}</span>}
+                        </button>
+                        <button
+                            onClick={() => setTab('pruned')}
+                            className={`flex items-center gap-1 px-2 py-1 text-[9px] uppercase tracking-wider transition-colors ${tab === 'pruned' ? 'bg-amber-500/20 text-amber-400 font-bold' : 'text-text-dim hover:text-amber-400'}`}
+                        >
+                            <Archive size={10} />
+                            Pruned
+                            {prunedLog.length > 0 && <span className="text-[8px] bg-white/10 px-1 rounded">{prunedLog.length}</span>}
                         </button>
                     </div>
                     <span className="text-[9px] text-text-dim">{hasSummary ? `(up to msg #${condensedUpToIndex})` : '(no summary yet)'}</span>
@@ -175,7 +205,7 @@ export function CondensedPanel({
                     ) : (
                         <p className="text-[10px] text-text-dim italic">No condensed summary yet. Run Condense to generate one, or switch to the Register tab to view divergence entries.</p>
                     )
-                ) : (
+                ) : tab === 'register' ? (
                     <div className="space-y-3">
                         <div className="flex items-center justify-between">
                             <span className="text-[9px] text-text-dim uppercase tracking-wider">{entries.length} entries &middot; ~{regTokens} tokens</span>
@@ -187,6 +217,42 @@ export function CondensedPanel({
                                     >
                                         <Plus size={10} />
                                         Add Manual
+                                    </button>
+                                )}
+                                {provider && onManualPrune && (
+                                    <button
+                                        onClick={async () => {
+                                            setPruneLoading(true);
+                                            try {
+                                                await onManualPrune();
+                                            } catch (e) {
+                                                console.error('[Manual Prune] failed', e);
+                                            }
+                                            setPruneLoading(false);
+                                        }}
+                                        disabled={pruneLoading || entries.length === 0}
+                                        className="flex items-center gap-1 text-[9px] text-purple-400 hover:text-purple-300 disabled:opacity-40"
+                                    >
+                                        {pruneLoading ? <RotateCw size={10} className="animate-spin" /> : <Scissors size={10} />}
+                                        Prune Chapter
+                                    </button>
+                                )}
+                                {provider && onMergeSimilar && (
+                                    <button
+                                        onClick={async () => {
+                                            setMergeLoading(true);
+                                            try {
+                                                await onMergeSimilar();
+                                            } catch (e) {
+                                                console.error('[Merge Similar] failed', e);
+                                            }
+                                            setMergeLoading(false);
+                                        }}
+                                        disabled={mergeLoading || entries.length < 2}
+                                        className="flex items-center gap-1 text-[9px] text-cyan-400 hover:text-cyan-300 disabled:opacity-40"
+                                    >
+                                        {mergeLoading ? <RotateCw size={10} className="animate-spin" /> : <Combine size={10} />}
+                                        Merge Similar
                                     </button>
                                 )}
                                 {provider && onAISummary && (
@@ -211,7 +277,6 @@ export function CondensedPanel({
                             </div>
                         </div>
                         
-                        {/* Token Budget Bar */}
                         <div className="space-y-1">
                             <div className="flex justify-between text-[8px] uppercase tracking-tighter text-text-dim font-mono">
                                 <span>Register Payload</span>
@@ -230,7 +295,7 @@ export function CondensedPanel({
                             <>
                                 <QuestPanel entries={entries} onResolve={(id) => onResolveDivergence?.(id)} />
                                 <div className="space-y-1.5">
-                                    {entries.filter(e => e.category !== 'obligation' || e.resolved).map(e => (
+                                    {entries.filter(e => !e.reviewFlag && (e.category !== 'obligation' || e.resolved)).map(e => (
                                         editingId === e.id ? (
                                             <div key={e.id} className="bg-void-lighter border border-amber-500/30 p-2 rounded-sm space-y-1.5">
                                                 <div className="flex gap-1.5">
@@ -306,6 +371,84 @@ export function CondensedPanel({
                                     ))}
                                 </div>
                             </>
+                        )}
+                    </div>
+                ) : tab === 'review' ? (
+                    <div className="space-y-3">
+                        <span className="text-[9px] text-text-dim uppercase tracking-wider">
+                            {reviewCount} entries flagged for review — keep or delete each one.
+                        </span>
+                        {reviewCount === 0 ? (
+                            <p className="text-[10px] text-text-dim italic">No entries flagged for review.</p>
+                        ) : (
+                            <div className="space-y-1.5">
+                                {entries.filter(e => e.reviewFlag).map(e => (
+                                    <div key={e.id} className="bg-red-900/20 border border-red-500/60 p-1.5 rounded-sm">
+                                        <div className="flex items-start gap-2 text-[10px]">
+                                            <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${e.category === 'canon_override' ? 'bg-red-400' : e.category === 'world_change' ? 'bg-blue-400' : e.category === 'entity_state' ? 'bg-purple-400' : e.category === 'player_state' ? 'bg-green-400' : 'bg-amber-400'}`} title={e.category} />
+                                            <div className="min-w-0 flex-1">
+                                                <span className="text-red-400 font-bold mr-1">[REVIEW]</span>
+                                                <span className="text-text-primary">{e.subject}: {e.divergence}</span>
+                                                <span className="text-text-dim ml-1">[#{e.sceneRef}]</span>
+                                                {e.parseError && <span className="text-danger font-bold ml-1">[PARSE ERR]</span>}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 mt-1.5 ml-3.5">
+                                            <span className="text-[8px] text-red-400/70 italic">keep or delete?</span>
+                                            {onConfirmReviewEntry && (
+                                                <button
+                                                    onClick={() => onConfirmReviewEntry(e.id)}
+                                                    className="flex items-center gap-0.5 text-[9px] text-emerald-400 hover:text-emerald-300 px-1.5 py-0.5 rounded-sm bg-emerald-500/10"
+                                                >
+                                                    <Check size={8} /> Keep
+                                                </button>
+                                            )}
+                                            {onDeleteReviewedEntry && (
+                                                <button
+                                                    onClick={() => onDeleteReviewedEntry(e.id)}
+                                                    className="flex items-center gap-0.5 text-[9px] text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded-sm bg-red-500/10"
+                                                >
+                                                    <X size={8} /> Delete
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="space-y-3">
+                        <span className="text-[9px] text-text-dim uppercase tracking-wider">
+                            {prunedLog.length} pruned entries — not sent to AI. Restore to move back into register.
+                        </span>
+                        {prunedLog.length === 0 ? (
+                            <p className="text-[10px] text-text-dim italic">No pruned entries yet. Entries appear here after chapter seal pruning.</p>
+                        ) : (
+                            <div className="space-y-1.5">
+                                {prunedLog.map((p, idx) => (
+                                    <div key={idx} className="flex items-start gap-2 text-[10px] p-1 rounded-sm bg-white/[0.02] border border-white/5 group">
+                                        <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${p.verdict === 'auto_pruned' ? 'bg-gray-500' : 'bg-red-500'}`} title={p.verdict} />
+                                        <div className="min-w-0 flex-1">
+                                            <span className="text-text-primary/60">{p.originalEntry.subject}: {p.originalEntry.divergence}</span>
+                                            <span className="text-text-dim ml-1">[#{p.originalEntry.sceneRef}]</span>
+                                            <div className="text-[8px] text-text-dim/60 mt-0.5">
+                                                {p.verdict === 'auto_pruned' ? `Auto-pruned (CH ${p.chapterId})` : 'User deleted after review'}
+                                                {p.reason && ` — ${p.reason}`}
+                                            </div>
+                                        </div>
+                                        {onRestorePrunedEntry && (
+                                            <button
+                                                onClick={() => onRestorePrunedEntry(idx)}
+                                                className="text-text-dim hover:text-emerald-400 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                                title="Restore entry"
+                                            >
+                                                <RotateCcw size={9} />
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
                         )}
                     </div>
                 )}

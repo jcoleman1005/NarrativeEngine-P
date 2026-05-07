@@ -34,7 +34,7 @@ export async function hydrateCampaign(campaignId: string) {
         timeline: timeline ?? [],
         chapters: chapters ?? [],
         entities: entities ?? [],
-        divergenceRegister: backfillParseErrors(divReg ?? { entries: [], lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 1 }),
+        divergenceRegister: backfillParseErrors(divReg ?? { entries: [], prunedLog: [], lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 1 }),
         activeCampaignId: campaignId,
         inventoryItems: migratedContext.inventoryItems,
         characterProfileData: migratedContext.characterProfileData,

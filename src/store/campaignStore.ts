@@ -252,6 +252,7 @@ export async function saveDivergenceRegister(campaignId: string, register: Diver
 
 export async function loadDivergenceRegister(campaignId: string): Promise<DivergenceRegister> {
     const res = await fetch(`${API}/campaigns/${campaignId}/divergence`);
-    if (!res.ok) return { entries: [], lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 1 };
-    return res.json();
+    if (!res.ok) return { entries: [], prunedLog: [], lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 1 };
+    const data = await res.json();
+    return { ...data, prunedLog: data.prunedLog ?? [] };
 }

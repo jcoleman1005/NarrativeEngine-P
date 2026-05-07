@@ -12,7 +12,8 @@ import { scanPressure, buildPressurePatch } from './npcPressureTracker';
 import { scanCharacterProfile } from './characterProfileParser';
 import { scanInventory } from './inventoryParser';
 import { toast } from '../components/Toast';
-import { extractDivergences, mergeEntries, EMPTY_REGISTER } from './divergenceRegister';
+import { extractDivergences, mergeEntries, pruneChapterEntries, EMPTY_REGISTER } from './divergenceRegister';
+import { saveDivergenceRegister } from '../store/campaignStore';
 
 export async function runPostTurnPipeline(
     state: TurnState,
@@ -99,6 +100,18 @@ async function runArchiveTrack(
                     const latestChapters = await api.chapters.list(activeCampaignId);
                     state.setChapters(latestChapters);
                     console.log(`[Auto-Seal] Summary generated for "${ch.title}"`);
+                }
+
+                const liveRegister = useAppStore.getState().divergenceRegister;
+                if (liveRegister && liveRegister.entries.length > 0) {
+                    const allChaptersNow = await api.chapters.list(activeCampaignId);
+                    const sealedWithSummary = allChaptersNow.find(c => c.chapterId === sealResult.sealedChapter.chapterId);
+                    const chapterForPrune = sealedWithSummary && (sealedWithSummary.summary || sealedWithSummary.unresolvedThreads?.length)
+                        ? sealedWithSummary
+                        : sealResult.sealedChapter;
+                    const pruned = await pruneChapterEntries(sealProvider, chapterForPrune, liveRegister, allChaptersNow);
+                    callbacks.setDivergenceRegister?.(pruned);
+                    await saveDivergenceRegister(activeCampaignId, pruned);
                 }
             }
         }).catch(err => console.warn('[Auto-Seal] Failed:', err));

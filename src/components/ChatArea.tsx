@@ -16,7 +16,7 @@ import { useCondenser } from './hooks/useCondenser';
 import { useChapterSealing } from './hooks/useChapterSealing';
 import { useMessageEditor } from './hooks/useMessageEditor';
 import { mergeEntries, EMPTY_REGISTER } from '../services/divergenceRegister';
-import type { DivergenceEntry, DivergenceRegister, EndpointConfig } from '../types';
+import type { ChatMessage, DivergenceEntry, DivergenceRegister, EndpointConfig } from '../types';
 
 
 export function ChatArea() {
@@ -40,6 +40,7 @@ export function ChatArea() {
         setCondensed, setCondensing, deleteMessage, deleteMessagesFrom,
         resetCondenser, setTimeline, setChapters,
         setDivergenceRegister, updateMessageDivergence,
+        confirmReviewEntry, deleteReviewedEntry, restorePrunedEntry,
         pipelinePhase, streamingStats, setPipelinePhase, setStreamingStats,
     } = useAppStore(
         useShallow(s => ({
@@ -56,6 +57,9 @@ export function ChatArea() {
             setChapters: s.setChapters,
             setDivergenceRegister: s.setDivergenceRegister,
             updateMessageDivergence: s.updateMessageDivergence,
+            confirmReviewEntry: s.confirmReviewEntry,
+            deleteReviewedEntry: s.deleteReviewedEntry,
+            restorePrunedEntry: s.restorePrunedEntry,
             pipelinePhase: s.pipelinePhase,
             streamingStats: s.streamingStats,
             setPipelinePhase: s.setPipelinePhase,
@@ -376,6 +380,44 @@ export function ChatArea() {
         }
     };
 
+    const handleManualPrune = async () => {
+        if (!activeCampaignId) return;
+        const provider = useAppStore.getState().getActiveUtilityEndpoint?.();
+        if (!provider) return;
+
+        const currentReg = useAppStore.getState().divergenceRegister || EMPTY_REGISTER;
+        if (currentReg.entries.length === 0) return;
+
+        const { pruneChapterEntries } = await import('../services/divergenceRegister');
+        const { api: apiClient } = await import('../services/apiClient');
+        const { saveDivergenceRegister: saveReg } = await import('../store/campaignStore');
+
+        const allChapters = await apiClient.chapters.list(activeCampaignId);
+        const lastSealed = [...allChapters].reverse().find(c => c.sealedAt && (c.summary || c.unresolvedThreads?.length));
+        const chapterForPrune = lastSealed || allChapters.find(c => !c.sealedAt) || allChapters[0];
+        if (!chapterForPrune) return;
+
+        const pruned = await pruneChapterEntries(provider as EndpointConfig, chapterForPrune, currentReg, allChapters);
+        setDivergenceRegister(pruned);
+        await saveReg(activeCampaignId, pruned);
+    };
+
+    const handleMergeSimilar = async () => {
+        if (!activeCampaignId) return;
+        const provider = useAppStore.getState().getActiveUtilityEndpoint?.();
+        if (!provider) return;
+
+        const currentReg = useAppStore.getState().divergenceRegister || EMPTY_REGISTER;
+        if (currentReg.entries.length < 2) return;
+
+        const { mergeSimilarEntries } = await import('../services/divergenceRegister');
+        const { saveDivergenceRegister: saveReg } = await import('../store/campaignStore');
+
+        const merged = await mergeSimilarEntries(provider as EndpointConfig, currentReg);
+        setDivergenceRegister(merged);
+        await saveReg(activeCampaignId, merged);
+    };
+
     return (
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
             {context.sceneNoteActive && (
@@ -544,6 +586,11 @@ export function ChatArea() {
                     onAddManual={() => setDivergenceModalOpen(true)}
                     provider={useAppStore.getState().getActiveUtilityEndpoint?.()}
                     contextLimit={settings.contextLimit}
+                    onConfirmReviewEntry={(id) => confirmReviewEntry(id)}
+                    onDeleteReviewedEntry={(id) => deleteReviewedEntry(id)}
+                    onRestorePrunedEntry={(idx) => restorePrunedEntry(idx)}
+                    onManualPrune={handleManualPrune}
+                    onMergeSimilar={handleMergeSimilar}
                 />
             )}
 
