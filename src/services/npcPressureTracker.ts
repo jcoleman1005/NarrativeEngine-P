@@ -138,34 +138,40 @@ const ARCHIVE_THRESHOLD_TURNS = 15;
 const ARCHIVE_PRESSURE_FLOOR = 0.5;
 const ARCHIVE_AFFINITY_PROTECT = 7;
 
-function lastEngagedTurn(npc: NPCEntry): number {
-    const history = npc.pressure?.history ?? [];
-    for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i].type === 'engaged') return history[i].turn;
-    }
-    return 0;
-}
+export function shouldArchiveNPC(npc: NPCEntry, currentTurn: number, maxStaleTurns: number = ARCHIVE_THRESHOLD_TURNS): { shouldArchive: boolean; turnsSince: number; reason: string } {
+    if (npc.archived) return { shouldArchive: false, turnsSince: 0, reason: '' };
+    if (maxStaleTurns <= 0) return { shouldArchive: false, turnsSince: 0, reason: '' };
+    if ((npc.affinity ?? 0) >= ARCHIVE_AFFINITY_PROTECT) return { shouldArchive: false, turnsSince: 0, reason: '' };
+    if (npc.shiftNote) return { shouldArchive: false, turnsSince: 0, reason: '' };
 
-export function shouldArchiveNPC(npc: NPCEntry, currentTurn: number, thresholdTurns = ARCHIVE_THRESHOLD_TURNS): { shouldArchive: boolean; turnsSince: number } {
-    if (npc.archived) return { shouldArchive: false, turnsSince: 0 };
-    if ((npc.affinity ?? 0) >= ARCHIVE_AFFINITY_PROTECT) return { shouldArchive: false, turnsSince: 0 };
-    if (npc.shiftNote) return { shouldArchive: false, turnsSince: 0 };
-
-    const last = lastEngagedTurn(npc);
-    const turnsSince = currentTurn - last;
-    if (turnsSince < thresholdTurns) return { shouldArchive: false, turnsSince };
+    const lastActive = npc.pressure?.lastActiveTurn ?? currentTurn;
+    const turnsSince = currentTurn - lastActive;
+    if (turnsSince < maxStaleTurns) return { shouldArchive: false, turnsSince, reason: '' };
 
     const decayedEngaged = applyDecay(npc.pressure?.engaged ?? 0, npc.pressure?.lastDecayTurn ?? 0, currentTurn);
     const decayedIgnored = applyDecay(npc.pressure?.ignored ?? 0, npc.pressure?.lastDecayTurn ?? 0, currentTurn);
+    const pressureArchive = decayedEngaged < ARCHIVE_PRESSURE_FLOOR && decayedIgnored < ARCHIVE_PRESSURE_FLOOR;
+
     return {
-        shouldArchive: decayedEngaged < ARCHIVE_PRESSURE_FLOOR && decayedIgnored < ARCHIVE_PRESSURE_FLOOR,
+        shouldArchive: true,
         turnsSince,
+        reason: pressureArchive ? 'auto-archive: stale + low pressure' : 'auto-archive: stale',
     };
 }
 
-export function findArchivedToRestore(playerInput: string, archivedNPCs: NPCEntry[]): string[] {
+export function findArchivedToRestore(text: string, archivedNPCs: NPCEntry[]): string[] {
+    const lower = text.toLowerCase();
     return archivedNPCs
-        .filter(n => mentionsName(playerInput, npcNamePatterns(n)))
+        .filter(npc => {
+            if (!npc.archived || !npc.name) return false;
+            const nameLower = npc.name.toLowerCase();
+            const aliases = (npc.aliases || '').split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
+            const patterns = [nameLower, ...aliases];
+            return patterns.some(p => {
+                const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                return new RegExp('\\b' + escaped + '\\b', 'i').test(lower);
+            });
+        })
         .map(n => n.id);
 }
 
@@ -198,11 +204,14 @@ export function buildPressurePatch(
         newHistory.splice(0, newHistory.length - MAX_HISTORY);
     }
 
+    const hasEngagedDelta = update.engagedDelta > 0;
+
     return {
         pressure: {
             ignored: newIgnored,
             engaged: newEngaged,
             lastDecayTurn: currentTurn,
+            lastActiveTurn: hasEngagedDelta ? currentTurn : (prev?.lastActiveTurn ?? currentTurn),
             history: newHistory,
         },
     };

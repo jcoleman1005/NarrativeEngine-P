@@ -28,6 +28,9 @@ export type UISlice = {
     setLoreCheckError: (error: string) => void;
     openLoreCheck: (selection: LoreCheckSelection) => void;
     closeLoreCheck: () => void;
+    divergenceEntryOpen: boolean;
+    openDivergenceEntry: () => void;
+    closeDivergenceEntry: () => void;
 };
 
 // ── Slice creator ──────────────────────────────────────────────────────
@@ -56,4 +59,7 @@ export const createUISlice: StateCreator<UISlice, [], [], UISlice> = (set) => ({
     setLoreCheckError: (error) => set({ loreCheckError: error }),
     openLoreCheck: (selection) => set({ loreCheckOpen: true, loreCheckSelection: selection, loreCheckResult: null, loreCheckError: '', loreCheckStatus: '' }),
     closeLoreCheck: () => set({ loreCheckOpen: false, loreCheckSelection: null, loreCheckResult: null, loreCheckError: '', loreCheckStatus: '' }),
+    divergenceEntryOpen: false,
+    openDivergenceEntry: () => set({ divergenceEntryOpen: true }),
+    closeDivergenceEntry: () => set({ divergenceEntryOpen: false }),
 });

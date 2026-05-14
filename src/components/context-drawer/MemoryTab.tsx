@@ -1,0 +1,307 @@
+import { useState } from 'react';
+import { Edit2, Check, Pin, PinOff, ChevronDown, ChevronUp, AlertTriangle, Trash2 } from 'lucide-react';
+import { useAppStore } from '../../store/useAppStore';
+import type { DivergenceCategory, DivergenceEntry } from '../../types';
+import { countRegisterTokens, EMPTY_REGISTER, CATEGORY_LABELS, getEntriesForNpc } from '../../services/divergenceRegister';
+
+const CATEGORY_COLORS: Record<DivergenceCategory, string> = {
+    locations: 'text-blue-400',
+    npc_events: 'text-terminal',
+    promises_debts: 'text-amber-400',
+    world_state: 'text-ice',
+    party_facts: 'text-emerald-400',
+    rules_lore: 'text-purple-400',
+    misc: 'text-text-muted',
+};
+
+const CATEGORY_DOTS: Record<DivergenceCategory, string> = {
+    locations: 'bg-blue-400',
+    npc_events: 'bg-green-400',
+    promises_debts: 'bg-amber-400',
+    world_state: 'bg-cyan-400',
+    party_facts: 'bg-emerald-400',
+    rules_lore: 'bg-purple-400',
+    misc: 'bg-gray-400',
+};
+
+type Tab = 'facts' | 'review';
+
+export function MemoryTab() {
+    const divergenceRegister = useAppStore(s => s.divergenceRegister);
+    const chapters = useAppStore(s => s.chapters);
+    const settings = useAppStore(s => s.settings);
+    const deleteDivergenceFact = useAppStore(s => s.deleteDivergenceFact);
+    const confirmReviewEntry = useAppStore(s => s.confirmReviewEntry);
+    const toggleDivergenceChapter = useAppStore(s => s.toggleDivergenceChapter);
+    const toggleDivergenceCategory = useAppStore(s => s.toggleDivergenceCategory);
+    const pinDivergenceFact = useAppStore(s => s.pinDivergenceFact);
+    const editDivergenceFact = useAppStore(s => s.editDivergenceFact);
+
+    const [tab, setTab] = useState<Tab>('facts');
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editText, setEditText] = useState('');
+    const [expandedChapter, setExpandedChapter] = useState<string | null>(null);
+    const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+
+    const reg = divergenceRegister ?? EMPTY_REGISTER;
+    const tokenBudget = settings.divergenceTokenBudget ?? 2000;
+    const regTokens = countRegisterTokens(reg, chapters);
+    const entries = reg.entries;
+    const reviewEntries = entries.filter(e => e.reviewFlag);
+
+    const pinnedEntries = entries.filter(e => e.pinned);
+    const unpinnedEntries = entries.filter(e => !e.pinned);
+
+    const byChapter = new Map<string, DivergenceEntry[]>();
+    for (const e of unpinnedEntries) {
+        if (!byChapter.has(e.chapterId)) byChapter.set(e.chapterId, []);
+        byChapter.get(e.chapterId)!.push(e);
+    }
+
+    const chapterTitleMap = new Map<string, string>();
+    if (chapters) {
+        for (const ch of chapters) {
+            chapterTitleMap.set(ch.chapterId, ch.title);
+        }
+    }
+
+    const activeCount = entries.filter(e => {
+        if (e.pinned) return true;
+        const chapterOn = reg.chapterToggles[e.chapterId] !== false;
+        if (!chapterOn) return false;
+        const catToggles = reg.categoryToggles[e.chapterId];
+        if (catToggles && catToggles[e.category] === false) return false;
+        return true;
+    }).length;
+    const pinnedCount = pinnedEntries.length;
+
+    const handleStartEdit = (e: DivergenceEntry) => {
+        setEditingId(e.id);
+        setEditText(e.text);
+    };
+
+    const handleSaveEdit = () => {
+        if (!editingId) return;
+        editDivergenceFact(editingId, editText);
+        setEditingId(null);
+        setEditText('');
+    };
+
+    const handleDelete = (id: string) => {
+        if (window.confirm('Delete this fact permanently?')) {
+            deleteDivergenceFact(id);
+        }
+    };
+
+    // Find the open chapter for the placeholder
+    const openChapter = chapters?.find(c => !c.sealedAt);
+
+    return (
+        <div className="p-3 space-y-3">
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                <button
+                    onClick={() => setTab('facts')}
+                    className={`flex items-center gap-0.5 text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${tab === 'facts' ? 'text-amber-400 bg-amber-500/10' : 'text-text-dim'}`}
+                >
+                    Facts ({activeCount})
+                </button>
+                {reviewEntries.length > 0 && (
+                    <button
+                        onClick={() => setTab('review')}
+                        className={`flex items-center gap-0.5 text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${tab === 'review' ? 'text-amber-400 bg-amber-500/10' : 'text-text-dim'}`}
+                    >
+                        <AlertTriangle size={9} />
+                        Rev ({reviewEntries.length})
+                    </button>
+                )}
+            </div>
+
+            <div className="text-[9px] text-text-dim">
+                {regTokens}/{tokenBudget} tkns &middot; {activeCount} active{pinnedCount > 0 ? ` · ${pinnedCount} pinned` : ''}
+            </div>
+
+            {tab === 'facts' && (
+                <div className="space-y-3">
+                    {pinnedEntries.length > 0 && (
+                        <div className="space-y-1">
+                            <div className="text-[9px] uppercase font-bold text-amber-400 tracking-wider flex items-center gap-1">
+                                <Pin size={9} /> Pinned
+                            </div>
+                            {pinnedEntries.map(e => (
+                                <div key={e.id} className="flex items-start gap-1 text-[11px] text-text-primary">
+                                    <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${CATEGORY_DOTS[e.category]}`} />
+                                    <span className="min-w-0 flex-1">
+                                        <span className={`${CATEGORY_COLORS[e.category]} text-[9px] uppercase`}>{CATEGORY_LABELS[e.category]}</span>
+                                        {' '}{e.text}
+                                        <span className="text-text-dim/40 text-[9px]"> [#{e.sceneRef}]{e.source === 'manual' ? ' ⚡' : ''}</span>
+                                    </span>
+                                    <span className="flex items-center gap-0.5 shrink-0">
+                                        <button onClick={() => pinDivergenceFact(e.id)} className="text-amber-400 p-0.5" title="Unpin">
+                                            <PinOff size={9} />
+                                        </button>
+                                        <button onClick={() => handleStartEdit(e)} className="text-text-muted hover:text-amber-400 p-0.5" title="Edit">
+                                            <Edit2 size={9} />
+                                        </button>
+                                        <button onClick={() => handleDelete(e.id)} className="text-text-muted hover:text-red-400 p-0.5" title="Delete">
+                                            <Trash2 size={9} />
+                                        </button>
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {[...byChapter.entries()].map(([chapterId, chapterEntries]) => {
+                        const chapterTitle = chapterTitleMap.get(chapterId) ?? chapterId;
+                        const chapterOn = reg.chapterToggles[chapterId] !== false;
+                        const isExpanded = expandedChapter === chapterId;
+
+                        const catGroups = new Map<DivergenceCategory, DivergenceEntry[]>();
+                        for (const e of chapterEntries) {
+                            if (!catGroups.has(e.category)) catGroups.set(e.category, []);
+                            catGroups.get(e.category)!.push(e);
+                        }
+
+                        return (
+                            <div key={chapterId} className="border border-border/30 rounded">
+                                <button
+                                    className="w-full flex items-center justify-between px-2 py-1.5 text-left"
+                                    onClick={() => setExpandedChapter(isExpanded ? null : chapterId)}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={chapterOn}
+                                            onChange={(ev) => { ev.stopPropagation(); toggleDivergenceChapter(chapterId, !chapterOn); }}
+                                            className="w-3 h-3 accent-terminal"
+                                            onClick={(ev) => ev.stopPropagation()}
+                                        />
+                                        <span className="text-[11px] font-bold text-text-primary">{chapterTitle}</span>
+                                        <span className="text-[9px] text-text-dim">{chapterEntries.length} facts</span>
+                                    </div>
+                                    {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                </button>
+
+                                {isExpanded && [...catGroups.entries()].map(([cat, catEntries]) => {
+                                    const catKey = `${chapterId}-${cat}`;
+                                    const catExpanded = expandedCategory === catKey;
+
+                                    return (
+                                        <div key={cat} className="border-t border-border/20">
+                                            <button
+                                                className="w-full flex items-center justify-between px-3 py-1 text-left"
+                                                onClick={() => setExpandedCategory(catExpanded ? null : catKey)}
+                                            >
+                                                <div className="flex items-center gap-1.5">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={reg.categoryToggles[chapterId]?.[cat] !== false}
+                                                        onChange={(ev) => { ev.stopPropagation(); toggleDivergenceCategory(chapterId, cat, reg.categoryToggles[chapterId]?.[cat] !== false); }}
+                                                        className="w-2.5 h-2.5 accent-terminal"
+                                                        onClick={(ev) => ev.stopPropagation()}
+                                                    />
+                                                    <span className={`text-[9px] uppercase font-bold ${CATEGORY_COLORS[cat]}`}>{CATEGORY_LABELS[cat]}</span>
+                                                    <span className="text-[8px] text-text-dim">{catEntries.length}</span>
+                                                </div>
+                                                {catExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                                            </button>
+
+                                            {catExpanded && (
+                                                <div className="px-3 pb-1.5 space-y-0.5">
+                                                    {catEntries.map(e => (
+                                                        editingId === e.id ? (
+                                                            <div key={e.id} className="bg-void border border-amber-500/30 p-1.5 rounded space-y-1">
+                                                                <textarea
+                                                                    value={editText}
+                                                                    onChange={ev => setEditText(ev.target.value)}
+                                                                    className="w-full bg-void border border-white/10 text-text-primary text-[10px] px-1 py-0.5 rounded outline-none resize-y min-h-[24px] max-h-[48px]"
+                                                                    rows={2}
+                                                                />
+                                                                <div className="flex gap-1.5 justify-end">
+                                                                    <button onClick={handleSaveEdit} className="flex items-center gap-0.5 text-[9px] text-emerald-400 hover:text-emerald-300 px-1">
+                                                                        <Check size={8} /> Save
+                                                                    </button>
+                                                                    <button onClick={() => setEditingId(null)} className="text-[9px] text-text-dim hover:text-red-400 px-1">
+                                                                        Cancel
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div key={e.id} className="flex items-start gap-1 text-[11px] text-text-secondary">
+                                                                <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${CATEGORY_DOTS[e.category]}`} />
+                                                                <span className="min-w-0 flex-1">
+                                                                    {e.text}
+                                                                    <span className="text-text-dim/40 text-[9px]"> [#{e.sceneRef}]{e.source === 'manual' ? ' ⚡' : ''}</span>
+                                                                </span>
+                                                                <span className="flex items-center gap-0.5 shrink-0">
+                                                                    <button onClick={() => pinDivergenceFact(e.id)} className="text-text-muted hover:text-amber-400 p-0.5" title="Pin">
+                                                                        <Pin size={9} />
+                                                                    </button>
+                                                                    <button onClick={() => handleStartEdit(e)} className="text-text-muted hover:text-amber-400 p-0.5" title="Edit">
+                                                                        <Edit2 size={9} />
+                                                                    </button>
+                                                                    <button onClick={() => handleDelete(e.id)} className="text-text-muted hover:text-red-400 p-0.5" title="Delete">
+                                                                        <Trash2 size={9} className="inline" />
+                                                                    </button>
+                                                                </span>
+                                                            </div>
+                                                        )
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })}
+
+                    {entries.length === 0 && openChapter && (
+                        <div className="text-[11px] text-text-dim/50 italic py-4 text-center">
+                            No established facts yet. Facts will be extracted when Chapter {openChapter.chapterId} seals at scene {openChapter.sceneRange[1] || '?'}.
+                        </div>
+                    )}
+                    {entries.length === 0 && !openChapter && (
+                        <div className="text-[11px] text-text-dim/50 italic py-4 text-center">
+                            No established facts yet. Facts are extracted when chapters seal.
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {tab === 'review' && (
+                <div className="space-y-1.5">
+                    {reviewEntries.length === 0 ? (
+                        <p className="text-[10px] text-text-dim italic py-4 text-center">No entries flagged for review.</p>
+                    ) : (
+                        reviewEntries.map(e => (
+                            <div key={e.id} className="bg-amber-900/20 border border-amber-500/40 p-1.5 rounded">
+                                <div className="flex items-start gap-1.5 text-[10px]">
+                                    <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${CATEGORY_DOTS[e.category]}`} />
+                                    <div className="min-w-0 flex-1">
+                                        <span className="text-amber-400 font-bold text-[9px] mr-1">[REVIEW]</span>
+                                        <span className="text-text-primary">{e.text}</span>
+                                        <span className="text-text-dim ml-1 text-[9px]">[#{e.sceneRef}]</span>
+                                        {e.unrecognizedNpcNames && e.unrecognizedNpcNames.length > 0 && (
+                                            <div className="text-[9px] text-amber-300 mt-0.5">
+                                                Unrecognized: {e.unrecognizedNpcNames.join(', ')}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-1 ml-3.5">
+                                    <button onClick={() => confirmReviewEntry(e.id)} className="flex items-center gap-0.5 text-[9px] text-emerald-400 hover:text-emerald-300 px-1.5 py-0.5 rounded bg-emerald-500/10">
+                                        <Check size={8} /> Keep
+                                    </button>
+                                    <button onClick={() => handleDelete(e.id)} className="flex items-center gap-0.5 text-[9px] text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded bg-red-500/10">
+                                        <AlertTriangle size={8} /> Delete
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}

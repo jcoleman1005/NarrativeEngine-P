@@ -24,7 +24,7 @@ export function LoreCheckModal() {
     const setResult = useAppStore(s => s.setLoreCheckResult);
     const setError = useAppStore(s => s.setLoreCheckError);
     const close = useAppStore(s => s.closeLoreCheck);
-    const updateMessageContent = useAppStore(s => s.updateMessageContent);
+    const replaceMessageText = useAppStore(s => s.replaceMessageText);
 
     const [stage, setStage] = useState<Stage>('hint');
     const [hint, setHint] = useState('');
@@ -123,14 +123,7 @@ export function LoreCheckModal() {
 
     const accept = (text: string) => {
         if (!selection) return;
-        const state = useAppStore.getState();
-        const msg = state.messages.find(m => m.id === selection.messageId);
-        if (!msg || typeof msg.content !== 'string') {
-            close();
-            return;
-        }
-        const newContent = msg.content.replace(selection.selectedText, text);
-        updateMessageContent(selection.messageId, newContent);
+        replaceMessageText(selection.messageId, selection.selectedText, text);
         close();
     };
 

@@ -2,6 +2,9 @@ import { Trash2, Save, Loader2, Sparkles, Users } from 'lucide-react';
 import { NPCPortraitSection } from './NPCPortraitSection';
 import type { NPCEntry, NPCVisualProfile } from '../../types';
 import { DEFAULT_VISUAL_PROFILE } from '../../types';
+import { useAppStore } from '../../store/useAppStore';
+import { getEntriesForNpc, CATEGORY_LABELS, EMPTY_REGISTER } from '../../services/divergenceRegister';
+import type { DivergenceCategory } from '../../types';
 
 type Props = {
     form: Partial<NPCEntry>;
@@ -235,6 +238,43 @@ export function NPCEditForm({
                     />
                 </div>
             </div>
+
+            {/* Established Facts for this NPC */}
+            {selectedId && (() => {
+                const reg = useAppStore.getState().divergenceRegister ?? EMPTY_REGISTER;
+                const npcEntries = getEntriesForNpc(reg, selectedId);
+                if (npcEntries.length === 0) return null;
+                const chapters = useAppStore.getState().chapters ?? [];
+                const chapterTitleMap = new Map(chapters.map(c => [c.chapterId, c.title]));
+                return (
+                    <div className="mt-4 border-t border-border pt-3">
+                        <h4 className="text-[10px] uppercase tracking-wider font-bold text-amber-400 mb-2 flex items-center gap-1">
+                            <Users size={10} />
+                            Established Facts ({npcEntries.length})
+                        </h4>
+                        <div className="space-y-1 max-h-[150px] overflow-y-auto">
+                            {npcEntries.map(e => (
+                                <div key={e.id} className="text-[10px] flex items-start gap-1">
+                                    <span className={`shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full ${
+                                        e.category === 'locations' ? 'bg-blue-400' :
+                                        e.category === 'npc_events' ? 'bg-green-400' :
+                                        e.category === 'promises_debts' ? 'bg-amber-400' :
+                                        e.category === 'world_state' ? 'bg-cyan-400' :
+                                        e.category === 'party_facts' ? 'bg-emerald-400' :
+                                        e.category === 'rules_lore' ? 'bg-purple-400' : 'bg-gray-400'
+                                    }`} />
+                                    <span className="text-text-secondary">
+                                        <span className="text-text-dim text-[9px] uppercase">{CATEGORY_LABELS[e.category]}</span>{' '}
+                                        {e.text}
+                                        <span className="text-text-dim/40 text-[9px]"> [#{e.sceneRef}]</span>
+                                        <span className="text-text-dim/30 text-[9px]"> — {chapterTitleMap.get(e.chapterId) ?? e.chapterId}</span>
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* Actions Bar */}
             {isEditing && (

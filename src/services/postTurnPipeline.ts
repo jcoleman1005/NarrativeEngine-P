@@ -8,7 +8,7 @@ import { sealChapterCombined } from './saveFileEngine';
 import { backgroundQueue } from './backgroundQueue';
 import { extractNPCNames, classifyNPCNames, validateNPCCandidates } from './npcDetector';
 import { generateNPCProfile, updateExistingNPCs, backfillNPCDrives } from './chatEngine';
-import { scanPressure, buildPressurePatch } from './npcPressureTracker';
+import { scanPressure, buildPressurePatch, shouldArchiveNPC, findArchivedToRestore } from './npcPressureTracker';
 import { scanCharacterProfile } from './characterProfileParser';
 import { scanInventory } from './inventoryParser';
 import { toast } from '../components/Toast';
@@ -53,7 +53,7 @@ export async function runPostTurnPipeline(
     const results = await Promise.allSettled([
         runArchiveTrack(state, callbacks, displayInput, lastAssistantContent, allMsgs, activeCampaignId),
         runNPCTrack(state, callbacks, lastAssistantContent, allMsgs, npcLedger, activeCampaignId),
-        runPressureTrack(state, callbacks, displayInput, npcLedger, activeCampaignId),
+        runPressureTrack(state, callbacks, displayInput, npcLedger, activeCampaignId, lastAssistantContent),
     ]);
 
     // ── On-Stage NPC Tracking ──
@@ -199,13 +199,19 @@ export async function runCombinedSeal(
         aliases: n.aliases,
     }));
 
+    const scanBudgetSetting = useAppStore.getState().settings.divergenceScanBudget ?? 0;
+    const contextLimit = useAppStore.getState().settings.contextLimit ?? 4096;
+    const effectiveScanBudget = scanBudgetSetting > 0 ? scanBudgetSetting : Math.round(contextLimit * 0.75);
+
     const result = await sealChapterCombined(
         provider,
         scenes,
         chapter.chapterId,
         chapter.title,
         sceneIds,
-        npcData
+        npcData,
+        2,
+        effectiveScanBudget
     );
 
     if (result.divergenceParseError && !result.summary && !result.divergences.length) {
@@ -331,7 +337,8 @@ async function runPressureTrack(
     callbacks: TurnCallbacks,
     displayInput: string,
     npcLedger: import('../types').NPCEntry[],
-    activeCampaignId: string
+    activeCampaignId: string,
+    lastAssistantContent: string
 ): Promise<void> {
     if (!npcLedger || npcLedger.length === 0) return;
 
@@ -373,6 +380,45 @@ async function runPressureTrack(
 
         if (update.reasons.length > 0) {
             console.log(`[PressureTracker] ${npc.name}: ignored=${patch.pressure?.ignored?.toFixed(1)}, engaged=${patch.pressure?.engaged?.toFixed(1)} — ${update.reasons.join(', ')}`);
+        }
+    }
+
+    // ── Auto-archive stale NPCs ──
+    const maxStaleTurns = useAppStore.getState().settings.autoArchiveStaleNPCsTurns ?? 0;
+    const currentTurn = archiveIndex.length;
+    if (maxStaleTurns > 0) {
+        const guardedArchiveNPC = (id: string, turn: number, reason: string) => {
+            const currentId = useAppStore.getState().activeCampaignId;
+            if (currentId !== activeCampaignId) return;
+            callbacks.archiveNPC(id, turn, reason);
+        };
+
+        for (const npc of activeNPCs) {
+            const result = shouldArchiveNPC(npc, currentTurn, maxStaleTurns);
+            if (result.shouldArchive) {
+                guardedArchiveNPC(npc.id, currentTurn, result.reason);
+                console.log(`[Auto-Archive] ${npc.name} archived after ${result.turnsSince} turns inactive`);
+            }
+        }
+    }
+
+    // ── Auto-restore archived NPCs mentioned in the response ──
+    const archivedNPCs = npcLedger.filter(n => n.archived);
+    if (archivedNPCs.length > 0) {
+        const toRestore = findArchivedToRestore(lastAssistantContent, archivedNPCs);
+        const guardedRestoreNPC = (id: string) => {
+            const currentId = useAppStore.getState().activeCampaignId;
+            if (currentId !== activeCampaignId) return;
+            callbacks.restoreNPC(id);
+        };
+
+        for (const npcId of toRestore) {
+            const npc = npcLedger.find(n => n.id === npcId);
+            guardedRestoreNPC(npcId);
+            if (npc) {
+                console.log(`[Auto-Restore] ${npc.name} re-enters the scene`);
+                toast.info(`${npc.name} re-enters the scene`);
+            }
         }
     }
 }

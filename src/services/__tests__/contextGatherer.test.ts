@@ -141,6 +141,7 @@ describe('gatherContext', () => {
             chapters: [{
                 chapterId: 'ch1',
                 sceneRange: ['005', '006'],
+                sceneIds: ['005', '006'],
                 title: 'Chapter 1',
                 sealedAt: null,
                 sceneCount: 2,

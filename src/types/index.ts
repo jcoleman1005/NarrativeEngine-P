@@ -146,8 +146,10 @@ export type AppSettings = {
     deepContextSearch?: boolean;
     autoExtractDivergences?: boolean;
     divergenceTokenBudget?: number;
+    divergenceScanBudget?: number;
     autoCondenseEnabled?: boolean;
     condenseAggressiveness?: 'tight' | 'smart' | 'deep';
+    autoArchiveStaleNPCsTurns?: number;
 
     // Legacy fields kept for migration only
     providers?: ProviderConfig[];
@@ -384,6 +386,7 @@ export type NPCPressure = {
     ignored: number;
     engaged: number;
     lastDecayTurn: number;
+    lastActiveTurn?: number;
     history: NPCPressureHistory[];
 };
 

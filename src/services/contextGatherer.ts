@@ -9,6 +9,7 @@ import { deepArchiveScan } from './deepArchiveSearch';
 import { getDivergenceSceneIds, EMPTY_REGISTER, buildSceneMap } from './divergenceRegister';
 import { rerankCandidates, type RerankCandidate } from './semanticReranker';
 import { callLLM } from './callLLM';
+import { queryFacts, formatFactsForContext } from './semanticMemory';
 
 const CALLBACK_REGEX = /\b(remember|earlier|back when|before|previously|that .*(we|i) (did|met|fought|saw|found|got))\b/i;
 
@@ -54,6 +55,7 @@ export type GatheredContext = {
     inventoryCategories: string[] | undefined;
     profileFields: string[] | undefined;
     deepContextSummary?: string;
+    semanticFactText?: string;
 };
 
 type GatherDeps = {
@@ -351,5 +353,12 @@ export async function gatherContext(
         }
     }
 
-    return { sceneNumber, archiveRecall, recommendedNPCNames, timelineEvents, relevantLore, semanticArchiveIds, semanticLoreIds, inventoryCategories, profileFields, deepContextSummary };
+    const semanticFacts = state.semanticFacts ?? [];
+    let semanticFactText: string | undefined;
+    if (semanticFacts.length > 0) {
+        const relevantFacts = queryFacts(semanticFacts, finalInput, messages, npcLedger, 500);
+        semanticFactText = formatFactsForContext(relevantFacts) || undefined;
+    }
+
+    return { sceneNumber, archiveRecall, recommendedNPCNames, timelineEvents, relevantLore, semanticArchiveIds, semanticLoreIds, inventoryCategories, profileFields, deepContextSummary, semanticFactText };
 }

@@ -260,7 +260,7 @@ export const ChapterCard = memo(function ChapterCard({
                                     }`}
                                 >
                                     <RefreshCcw size={12} />
-                                    <span>{status === 'invalidated' ? 'Repair Summary' : 'Regenerate'}</span>
+                                    <span>{status === 'invalidated' ? 'Repair Chapter' : 'Regenerate'}</span>
                                 </button>
                             )}
 

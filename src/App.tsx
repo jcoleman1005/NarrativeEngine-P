@@ -9,6 +9,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { NPCLedgerModal } from './components/NPCLedgerModal';
 import { BackupModal } from './components/BackupModal';
 import { LoreCheckModal } from './components/LoreCheckModal';
+import { DivergenceReviewModal } from './components/DivergenceReviewModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
 import { VaultUnlockModal } from './components/VaultUnlockModal';
@@ -140,6 +141,7 @@ export default function App() {
       <NPCLedgerModal />
       <BackupModal />
       <LoreCheckModal />
+      <DivergenceReviewModal />
       <ToastContainer />
     </ErrorBoundary>
   );

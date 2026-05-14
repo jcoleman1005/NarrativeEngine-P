@@ -106,6 +106,7 @@ export function createDefaultChapter(chapterId, title, sceneRangeStart, sceneCou
         chapterId,
         title,
         sceneRange: [sceneRangeStart, sceneRangeStart],
+        sceneIds: [],
         summary: '',
         keywords: [],
         npcs: [],

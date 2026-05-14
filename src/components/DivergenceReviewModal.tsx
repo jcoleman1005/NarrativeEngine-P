@@ -1,218 +1,163 @@
-import { useState, useEffect, useRef } from 'react';
-import type { ChatMessage, ArchiveIndexEntry, DivergenceRegister, EndpointConfig, DivergenceEntry, DivergenceCategory } from '../types';
-import { extractFromMessageBatch, buildSceneMap } from '../services/divergenceRegister';
+import { useState } from 'react';
+import { X, Sparkles, Loader2 } from 'lucide-react';
+import { useAppStore } from '../store/useAppStore';
+import { callLLM } from '../services/callLLM';
+import { extractJson } from '../services/payloadBuilder';
+import { CATEGORY_LABELS, coerceCategory } from '../services/divergenceRegister';
+import { uid } from '../utils/uid';
 import { toast } from './Toast';
+import type { DivergenceCategory, DivergenceEntry } from '../types';
 
-type DivergenceReviewModalProps = {
-    messages: ChatMessage[];
-    archiveIndex: ArchiveIndexEntry[];
-    currentRegister: DivergenceRegister;
-    provider: EndpointConfig;
-    onAccept: (entries: DivergenceEntry[]) => void;
-    onClose: () => void;
-};
+const CATEGORIES: DivergenceCategory[] = ['locations', 'npc_events', 'promises_debts', 'world_state', 'party_facts', 'rules_lore', 'misc'];
 
-type ReviewEntry = DivergenceEntry & {
-    accepted: boolean;
-};
+const STRUCTURE_PROMPT = `You are a structured data extractor for a tabletop RPG campaign. Given a free-form description of a campaign fact, output a JSON object with exactly two fields:
+- "category": one of [locations, npc_events, promises_debts, world_state, party_facts, rules_lore, misc]
+- "fact": a concise one-line canonical statement of the fact, in the format "Subject —predicate→ Object" where appropriate.
 
-const CATEGORY_COLORS: Record<DivergenceCategory, string> = {
-    canon_override: 'bg-red-900/40 text-red-300 border-red-700/50',
-    world_change: 'bg-purple-900/40 text-purple-300 border-purple-700/50',
-    entity_state: 'bg-blue-900/40 text-blue-300 border-blue-700/50',
-    player_state: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/50',
-    obligation: 'bg-amber-900/40 text-amber-300 border-amber-700/50',
-};
+Example input: "Aldric killed the Goblin King in the Northern Wastes"
+Example output: {"category": "npc_events", "fact": "Aldric —killed→ Goblin King [location: Northern Wastes]"}
 
-const CATEGORIES: DivergenceCategory[] = ['canon_override', 'world_change', 'entity_state', 'player_state', 'obligation'];
+Respond ONLY with the JSON object, no explanation.`;
 
-export function DivergenceReviewModal({
-    messages,
-    archiveIndex,
-    currentRegister,
-    provider,
-    onAccept,
-    onClose
-}: DivergenceReviewModalProps) {
-    const [status, setStatus] = useState<'loading' | 'editing'>('loading');
-    const [entries, setEntries] = useState<ReviewEntry[]>([]);
-    const abortRef = useRef<AbortController | null>(null);
+export function DivergenceReviewModal() {
+    const open = useAppStore(s => s.divergenceEntryOpen);
+    const addDivergenceEntry = useAppStore(s => s.addDivergenceEntry);
+    const closeDivergenceEntry = useAppStore(s => s.closeDivergenceEntry);
 
-    useEffect(() => {
-        abortRef.current = new AbortController();
-        const runExtraction = async () => {
-            try {
-                const { sceneIdsByMessageId } = buildSceneMap(archiveIndex, messages);
-                const { newEntries, parseFailures } = await extractFromMessageBatch(
-                    provider,
-                    messages,
-                    sceneIdsByMessageId,
-                    currentRegister,
-                    8000,
-                    abortRef.current?.signal,
-                    4000
-                );
-                
-                // Ensure all entries have 'manual' source since we are guiding the review
-                const reviewable: ReviewEntry[] = newEntries.map(e => ({
-                    ...e,
-                    source: 'manual',
-                    accepted: true
-                }));
-                
-                setEntries(reviewable);
-                setStatus('editing');
-                
-                if (parseFailures > 0) {
-                    toast.warning(`${parseFailures} entries failed to parse and may need editing`);
-                }
-            } catch (err) {
-                if (err instanceof Error && err.name === 'AbortError') return;
-                console.error('[ReviewModal] Extraction failed:', err);
-                toast.error('Failed to extract divergences');
-                onClose();
+    const [factText, setFactText] = useState('');
+    const [category, setCategory] = useState<DivergenceCategory | ''>('');
+    const [isStructuring, setIsStructuring] = useState(false);
+
+    if (!open) return null;
+
+    const handleStructure = async () => {
+        if (!factText.trim()) return;
+        setIsStructuring(true);
+        try {
+            const provider = useAppStore.getState().getActiveUtilityEndpoint() ?? useAppStore.getState().getActiveStoryEndpoint();
+            if (!provider) {
+                toast.error('No AI provider configured');
+                setIsStructuring(false);
+                return;
             }
-        };
-        
-        runExtraction();
-        
-        return () => {
-            if (abortRef.current) {
-                abortRef.current.abort();
-            }
-        };
-    }, [archiveIndex, messages, provider, currentRegister, onClose]);
-
-    const handleAccept = () => {
-        const accepted = entries.filter(e => e.accepted).map(e => {
-            const { accepted, ...rest } = e;
-            return rest;
-        });
-        onAccept(accepted);
+            const raw = await callLLM(provider, `${STRUCTURE_PROMPT}\n\nFact: ${factText.trim()}`, {
+                temperature: 0.3,
+                maxTokens: 256,
+                priority: 'low',
+            });
+            const jsonStr = extractJson(raw);
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.category) setCategory(coerceCategory(parsed.category));
+            if (parsed.fact) setFactText(parsed.fact);
+        } catch {
+            toast.error('Failed to structure fact');
+        }
+        setIsStructuring(false);
     };
 
-    const updateEntry = (index: number, patch: Partial<ReviewEntry>) => {
-        setEntries(prev => {
-            const next = [...prev];
-            next[index] = { ...next[index], ...patch };
-            return next;
-        });
+    const handleSubmit = () => {
+        if (!factText.trim() || !category) return;
+        const entry: DivergenceEntry = {
+            id: uid(),
+            chapterId: '',
+            category,
+            text: factText.trim(),
+            sceneRef: 'manual',
+            npcIds: [],
+            pinned: false,
+            source: 'manual',
+        };
+        addDivergenceEntry(entry);
+        setFactText('');
+        setCategory('');
+        closeDivergenceEntry();
+        toast.info('Fact added to divergence register');
+    };
+
+    const handleClose = () => {
+        setFactText('');
+        setCategory('');
+        closeDivergenceEntry();
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl flex flex-col w-full max-w-4xl max-h-[90vh]">
-                <div className="flex-none p-4 border-b border-gray-800 flex justify-between items-center">
-                    <div>
-                        <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
-                            <span className="text-blue-400">⚡</span> Divergence Review
-                        </h2>
-                        <p className="text-xs text-gray-400 mt-1">
-                            Scanning {messages.length} message{messages.length !== 1 && 's'}
-                        </p>
-                    </div>
-                    {status === 'editing' && (
-                        <div className="text-sm font-mono text-gray-400">
-                            {entries.filter(e => e.accepted).length} / {entries.length} selected
-                        </div>
-                    )}
+        <div
+            className="fixed inset-0 z-[150] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            onClick={handleClose}
+        >
+            <div
+                className="bg-void-darker border border-border max-w-lg w-full rounded font-mono text-sm"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="flex items-center justify-between p-3 border-b border-border">
+                    <span className="text-[10px] uppercase tracking-widest text-amber-400">◆ Add Campaign Fact</span>
+                    <button onClick={handleClose} className="text-text-dim hover:text-text-primary">
+                        <X size={14} />
+                    </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 min-h-[300px]">
-                    {status === 'loading' ? (
-                        <div className="flex flex-col items-center justify-center h-full space-y-4">
-                            <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                            <div className="text-gray-400 animate-pulse">Scanning for story divergences...</div>
-                        </div>
-                    ) : entries.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                            <p>No new divergences detected in this passage.</p>
-                            <p className="text-xs mt-2">The model did not find any campaign-altering facts.</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            {entries.map((entry, i) => (
-                                <div 
-                                    key={entry.id} 
-                                    className={`p-3 rounded-md border transition-colors ${
-                                        entry.accepted 
-                                            ? 'bg-gray-800 border-gray-700' 
-                                            : 'bg-gray-900/50 border-gray-800 opacity-60'
-                                    } ${entry.parseError ? 'border-red-500 border-dashed' : ''}`}
+                <div className="p-4 space-y-4">
+                    <div>
+                        <label className="block text-[10px] text-text-dim uppercase tracking-wider mb-1">
+                            Fact description
+                        </label>
+                        <textarea
+                            value={factText}
+                            onChange={(e) => setFactText(e.target.value)}
+                            placeholder="e.g. Aldric killed the Goblin King in the Northern Wastes"
+                            rows={3}
+                            className="w-full bg-void border border-border p-2 text-xs font-mono placeholder:text-text-dim/50 focus:outline-none focus:border-amber-500/40 rounded resize-y"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-[10px] text-text-dim uppercase tracking-wider mb-1">
+                            Category
+                        </label>
+                        <div className="flex flex-wrap gap-1">
+                            {CATEGORIES.map(cat => (
+                                <button
+                                    key={cat}
+                                    onClick={() => setCategory(cat)}
+                                    className={`text-[9px] uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
+                                        category === cat
+                                            ? 'bg-amber-500/15 border-amber-500/50 text-amber-400'
+                                            : 'border-border text-text-dim hover:text-text-primary hover:border-amber-500/30'
+                                    }`}
                                 >
-                                    <div className="flex gap-3">
-                                        <div className="pt-1">
-                                            <input 
-                                                type="checkbox"
-                                                checked={entry.accepted}
-                                                onChange={(e) => updateEntry(i, { accepted: e.target.checked })}
-                                                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-800"
-                                            />
-                                        </div>
-                                        <div className="flex-1 space-y-3">
-                                            <div className="flex flex-wrap gap-2">
-                                                <select
-                                                    value={entry.category}
-                                                    onChange={(e) => updateEntry(i, { category: e.target.value as DivergenceCategory })}
-                                                    className={`text-xs px-2 py-1 rounded border outline-none ${CATEGORY_COLORS[entry.category]}`}
-                                                    disabled={!entry.accepted}
-                                                >
-                                                    {CATEGORIES.map(c => (
-                                                        <option key={c} value={c} className="bg-gray-900 text-gray-300">{c}</option>
-                                                    ))}
-                                                </select>
-                                                
-                                                <input
-                                                    type="text"
-                                                    value={entry.subject}
-                                                    onChange={(e) => updateEntry(i, { subject: e.target.value })}
-                                                    placeholder="Subject / Entity"
-                                                    className="flex-1 bg-gray-950/50 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500"
-                                                    disabled={!entry.accepted}
-                                                />
-                                                
-                                                <div className="text-xs font-mono text-gray-500 py-1 px-2 bg-gray-900 rounded">
-                                                    Scene #{entry.sceneRef}
-                                                </div>
-                                            </div>
-                                            
-                                            <textarea
-                                                value={entry.divergence}
-                                                onChange={(e) => updateEntry(i, { divergence: e.target.value })}
-                                                placeholder="Fact description..."
-                                                className="w-full bg-gray-950/50 border border-gray-700 rounded p-2 text-sm text-gray-200 outline-none focus:border-blue-500 resize-y min-h-[60px]"
-                                                disabled={!entry.accepted}
-                                            />
-                                            
-                                            {entry.parseError && (
-                                                <div className="text-xs text-red-400 font-semibold mt-1">
-                                                    ⚠️ Model output parse error. Please verify the category and subject.
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
+                                    {CATEGORY_LABELS[cat]}
+                                </button>
                             ))}
                         </div>
-                    )}
-                </div>
+                    </div>
 
-                <div className="flex-none p-4 border-t border-gray-800 flex justify-end gap-3 bg-gray-800/50">
-                    <button
-                        onClick={onClose}
-                        className="px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded transition-colors"
-                    >
-                        {status === 'loading' ? 'Cancel' : 'Discard All'}
-                    </button>
-                    {status === 'editing' && entries.length > 0 && (
+                    <div className="flex gap-2">
                         <button
-                            onClick={handleAccept}
-                            disabled={entries.filter(e => e.accepted).length === 0}
-                            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg shadow-blue-900/20"
+                            onClick={handleStructure}
+                            disabled={isStructuring || !factText.trim()}
+                            className="text-[10px] uppercase tracking-widest border border-amber-500 text-amber-400 px-3 py-1.5 rounded hover:bg-amber-500/10 flex items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed"
                         >
-                            Accept Selected
+                            {isStructuring ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                            AI Structure
                         </button>
-                    )}
+                        <button
+                            onClick={handleSubmit}
+                            disabled={!factText.trim() || !category}
+                            className="text-[10px] uppercase tracking-widest bg-amber-500/10 border border-amber-500 text-amber-400 px-3 py-1.5 rounded hover:bg-amber-500/20 flex items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                            Add Fact
+                        </button>
+                        <button
+                            onClick={handleClose}
+                            className="text-[10px] uppercase tracking-widest border border-border text-text-dim px-3 py-1.5 rounded hover:text-text-primary"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+
+                    <p className="text-[8px] text-text-dim leading-tight">
+                        Manual facts are marked with source=manual and sceneRef=manual. Use "AI Structure" to auto-detect category and format.
+                    </p>
                 </div>
             </div>
         </div>

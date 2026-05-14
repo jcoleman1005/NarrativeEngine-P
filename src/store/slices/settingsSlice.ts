@@ -85,8 +85,10 @@ export const defaultSettings: AppSettings = {
     deepContextSearch: false,
     autoExtractDivergences: true,
     divergenceTokenBudget: 2000,
+    divergenceScanBudget: 0,
     autoCondenseEnabled: true,
     condenseAggressiveness: 'smart',
+    autoArchiveStaleNPCsTurns: 0,
 };
 
 export function applyTheme(theme: 'light' | 'dark') {
@@ -109,8 +111,10 @@ export function migrateSettings(data: Record<string, unknown>): AppSettings {
             deepContextSearch: (raw.deepContextSearch as boolean) ?? false,
             autoExtractDivergences: (raw.autoExtractDivergences as boolean) ?? true,
             divergenceTokenBudget: (raw.divergenceTokenBudget as number) ?? 2000,
+            divergenceScanBudget: (raw.divergenceScanBudget as number) ?? 0,
             autoCondenseEnabled: (raw.autoCondenseEnabled as boolean) ?? true,
             condenseAggressiveness: (raw.condenseAggressiveness as 'tight' | 'smart' | 'deep') ?? 'smart',
+            autoArchiveStaleNPCsTurns: (raw.autoArchiveStaleNPCsTurns as number) ?? 0,
         };
     }
 
@@ -156,8 +160,10 @@ export function migrateSettings(data: Record<string, unknown>): AppSettings {
         deepContextSearch: (raw.deepContextSearch as boolean) ?? false,
         autoExtractDivergences: (raw.autoExtractDivergences as boolean) ?? true,
         divergenceTokenBudget: (raw.divergenceTokenBudget as number) ?? 2000,
+        divergenceScanBudget: (raw.divergenceScanBudget as number) ?? 0,
         autoCondenseEnabled: true,
         condenseAggressiveness: 'smart',
+        autoArchiveStaleNPCsTurns: 0,
     };
 }
 

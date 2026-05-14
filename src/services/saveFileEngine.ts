@@ -1,7 +1,9 @@
-import type { ChatMessage, GameContext, ProviderConfig, EndpointConfig, ArchiveChapter } from '../types';
+import type { ChatMessage, GameContext, ProviderConfig, EndpointConfig, ArchiveChapter, DivergenceEntry, NPCEntry } from '../types';
 import { countTokens } from './tokenizer';
 import { extractJson } from './payloadBuilder';
 import { callLLM } from './callLLM';
+import { DIVERGENCE_CATEGORIES, CATEGORY_DEFINITIONS, coerceCategory } from './divergenceRegister';
+import { uid } from '../utils/uid';
 
 const BATCH_TOKEN_LIMIT = 100_000; // max tokens per LLM call for save engine
 
@@ -386,4 +388,236 @@ export async function generateChapterSummary(
     return null;
 }
 
+// ─── Combined Seal Call (summary + divergences in ONE LLM call) ───
+
+const COMBINED_SEAL_TOKEN_BUDGET = 12000;
+
+export type CombinedSealResult = {
+    summary: ChapterSummaryOutput | null;
+    divergences: DivergenceEntry[];
+    divergenceParseError?: boolean;
+};
+
+function buildCombinedSealPrompt(
+    scenes: { sceneId: string; content: string }[],
+    chapterTitle: string,
+    sceneIds: string[],
+    npcLedger: { id: string; name: string; aliases: string }[]
+): string {
+    const truncated = truncateScenesToBudget(scenes, COMBINED_SEAL_TOKEN_BUDGET);
+    const sceneContent = truncated.map(s => `--- SCENE ${s.sceneId} ---\n${s.content}`).join('\n\n');
+
+    const npcList = npcLedger.map(n =>
+        `- ${n.name} (id: ${n.id}${n.aliases ? ', also known as: ' + n.aliases : ''})`
+    ).join('\n');
+
+    const divergenceSlots = DIVERGENCE_CATEGORIES.filter(c => c !== 'misc').map(c =>
+        `### ${c.toUpperCase()}\nDefinition: ${CATEGORY_DEFINITIONS[c]}\nOutput: JSON array for this slot, or [] if empty.`
+    ).join('\n\n');
+
+    return `You are a TTRPG campaign archivist. Perform TWO tasks in a single response:
+
+TASK 1 — Generate a structured chapter summary.
+TASK 2 — Extract established facts that would BREAK A FUTURE SCENE if the AI contradicted them.
+
+CHAPTER: "${chapterTitle || 'Untitled'}"
+SCENE IDs IN THIS CHAPTER: ${sceneIds.join(', ')}
+
+NPC LEDGER (resolve names to IDs):
+${npcList || '(no NPCs in ledger)'}
+
+SCENE CONTENT:
+${sceneContent}
+
+OUTPUT FORMAT — a single JSON object with exactly two top-level keys: "summary" and "divergences".
+
+The "summary" value must be this JSON shape:
+{
+    "title": "Short evocative chapter title",
+    "summary": "3-5 sentence narrative summary of what happened",
+    "keywords": ["keyword1", "keyword2"],
+    "npcs": ["NPC Name 1", "NPC Name 2"],
+    "majorEvents": ["Event description 1", "Event description 2"],
+    "unresolvedThreads": ["Thread 1", "Thread 2"],
+    "tone": "one of: combat-heavy, exploration, social, mystery, political, emotional, mixed",
+    "themes": ["theme1", "theme2"]
+}
+
+The "divergences" value must be an object with one key per category slot. Each value is an array of fact objects, or [] if empty. Example:
+{
+    "locations": [
+        { "text": "Eastern gate destroyed by siege", "sceneRef": "014", "npcIds": [], "unrecognizedNpcNames": [] }
+    ],
+    "npc_events": [
+        { "text": "Grak allied with the player", "sceneRef": "018", "npcIds": ["npc_42"], "unrecognizedNpcNames": [] }
+    ],
+    "promises_debts": [],
+    "world_state": [],
+    "party_facts": [],
+    "rules_lore": [],
+    "misc": []
+}
+
+Category definitions:
+
+${divergenceSlots}
+
+### MISC
+Definition: ${CATEGORY_DEFINITIONS.misc}
+Output: JSON array for this slot, or [] if empty.
+
+DIVERGENCE EXTRACTION RULES:
+- Each fact is ONE SHORT SENTENCE, max 15 words. No compound sentences, no explanations.
+- sceneRef must be one of: ${sceneIds.join(', ')}
+- npcIds: list the NPC ledger IDs mentioned. If a name appears that is NOT in the ledger, put it in unrecognizedNpcNames instead.
+- Focus on: permanent changes, new information, relationship shifts, acquisitions, losses, oaths, regime changes.
+- Skip transient details, emotional narration, momentary states, and anything the archive would already surface.
+- If a slot is empty, output [] for that slot.
+
+SUMMARY RULES:
+1. Keywords should be distinctive nouns/places/factions — not generic words
+2. NPCs should include all significant named characters who appeared or were discussed
+3. Major events are plot-critical beats only (not every combat round)
+4. Unresolved threads are open plot hooks, promises, or mysteries
+5. Title should be 2-5 words, evocative
+6. Summary should read like a campaign journal entry, not a list`;
+}
+
+export function parseCombinedSealOutput(
+    raw: string,
+    chapterId: string,
+    sceneIds: string[],
+    npcLedger: { id: string; name: string; aliases: string }[]
+): CombinedSealResult {
+    const cleaned = extractJson(raw);
+    const sceneSet = new Set(sceneIds);
+    const fallbackScene = sceneIds[0] ?? '000';
+    const npcNameMap = new Map<string, string>();
+    for (const npc of npcLedger) {
+        npcNameMap.set(npc.name.toLowerCase(), npc.id);
+        if (npc.aliases) {
+            for (const alias of npc.aliases.split(',')) {
+                npcNameMap.set(alias.trim().toLowerCase(), npc.id);
+            }
+        }
+    }
+
+    let parsed: { summary?: unknown; divergences?: unknown };
+    let divergenceParseError = false;
+    try {
+        parsed = JSON.parse(cleaned);
+    } catch {
+        console.warn('[CombinedSeal] JSON parse failed, attempting summary-only fallback');
+        const summaryOnly = parseChapterSummaryOutput(raw);
+        return { summary: summaryOnly, divergences: [], divergenceParseError: true };
+    }
+
+    let summary: ChapterSummaryOutput | null = null;
+    if (parsed.summary && typeof parsed.summary === 'object') {
+        summary = parseChapterSummaryOutput(JSON.stringify(parsed.summary));
+    } else {
+        summary = parseChapterSummaryOutput(raw);
+    }
+
+    const entries: DivergenceEntry[] = [];
+    if (parsed.divergences && typeof parsed.divergences === 'object') {
+        const divObj = parsed.divergences as Record<string, unknown[]>;
+
+        for (const category of DIVERGENCE_CATEGORIES) {
+            const slotArr = divObj[category];
+            if (!Array.isArray(slotArr)) continue;
+
+            for (const item of slotArr) {
+                if (!item || typeof item !== 'object') continue;
+                const rawItem = item as Record<string, unknown>;
+                const text = typeof rawItem.text === 'string' ? rawItem.text.trim() : '';
+                if (!text) continue;
+
+                const sceneRef = typeof rawItem.sceneRef === 'string' && sceneSet.has(rawItem.sceneRef)
+                    ? rawItem.sceneRef
+                    : fallbackScene;
+
+                const rawNpcIds: string[] = Array.isArray(rawItem.npcIds) ? rawItem.npcIds.filter((id): id is string => typeof id === 'string') : [];
+                const resolvedNpcIds: string[] = [];
+                const unrecognized: string[] = Array.isArray(rawItem.unrecognizedNpcNames)
+                    ? rawItem.unrecognizedNpcNames.filter((n): n is string => typeof n === 'string')
+                    : [];
+
+                for (const id of rawNpcIds) {
+                    const found = npcLedger.some(n => n.id === id);
+                    if (found) {
+                        resolvedNpcIds.push(id);
+                    } else {
+                        unrecognized.push(id);
+                    }
+                }
+
+                const stillUnrecognized: string[] = [];
+                for (const name of unrecognized) {
+                    const matched = npcNameMap.get(name.toLowerCase());
+                    if (matched && !resolvedNpcIds.includes(matched)) {
+                        resolvedNpcIds.push(matched);
+                    } else {
+                        stillUnrecognized.push(name);
+                    }
+                }
+
+                const hasReviewFlag = stillUnrecognized.length > 0;
+
+                entries.push({
+                    id: `div_${uid()}`,
+                    chapterId,
+                    category: coerceCategory(category),
+                    text,
+                    sceneRef,
+                    npcIds: resolvedNpcIds,
+                    pinned: false,
+                    source: 'auto',
+                    reviewFlag: hasReviewFlag || undefined,
+                    unrecognizedNpcNames: stillUnrecognized.length > 0 ? stillUnrecognized : undefined,
+                });
+            }
+        }
+    } else {
+        divergenceParseError = true;
+    }
+
+    return { summary, divergences: entries, divergenceParseError: divergenceParseError || undefined };
+}
+
+export async function sealChapterCombined(
+    provider: ProviderConfig | EndpointConfig,
+    scenes: { sceneId: string; content: string }[],
+    chapterId: string,
+    chapterTitle: string,
+    sceneIds: string[],
+    npcLedger: { id: string; name: string; aliases: string }[],
+    maxRetries = 2,
+    scanBudget = 0
+): Promise<CombinedSealResult> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const prompt = buildCombinedSealPrompt(scenes, chapterTitle, sceneIds, npcLedger);
+        const label = attempt === 0 ? '' : ' (retry)';
+
+        console.log(`[CombinedSeal] Generating summary + divergences${label}...`, {
+            sceneCount: scenes.length,
+            sceneIds: sceneIds.length,
+            promptTokens: countTokens(prompt),
+        });
+
+        const output = await callLLM(provider, prompt, { priority: 'low', maxTokens: scanBudget > 0 ? scanBudget : 2000 });
+        const result = parseCombinedSealOutput(output, chapterId, sceneIds, npcLedger);
+
+        if (result.summary && !result.divergenceParseError) {
+            return result;
+        }
+        if (result.summary && result.divergenceParseError) {
+            console.warn(`[CombinedSeal] Attempt ${attempt + 1}: summary OK but divergence parse failed — retrying divergences`);
+            continue;
+        }
+        console.warn(`[CombinedSeal] Attempt ${attempt + 1} produced no usable output`);
+    }
+
+    return { summary: null, divergences: [], divergenceParseError: true };
+}
 

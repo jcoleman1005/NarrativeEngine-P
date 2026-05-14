@@ -14,6 +14,15 @@ export function createChaptersRouter() {
         res.json(chapters);
     }));
 
+    router.put('/api/campaigns/:id/archive/chapters', wrapAsync((req, res) => {
+        const cp = chaptersPath(req.params.id);
+        if (!Array.isArray(req.body)) {
+            return res.status(400).json({ error: 'Expected an array of chapters' });
+        }
+        writeJson(cp, req.body);
+        res.json(req.body);
+    }));
+
     router.post('/api/campaigns/:id/archive/chapters', wrapAsync((req, res) => {
         const cp = chaptersPath(req.params.id);
         const existing = readJson(cp, []);
@@ -46,7 +55,8 @@ export function createChaptersRouter() {
 
         const allowed = [
             'title', 'summary', 'keywords', 'npcs',
-            'majorEvents', 'unresolvedThreads', 'tone', 'themes', 'invalidated'
+            'majorEvents', 'unresolvedThreads', 'tone', 'themes', 'invalidated',
+            'sceneIds'
         ];
         for (const key of allowed) {
             if (req.body[key] !== undefined) {

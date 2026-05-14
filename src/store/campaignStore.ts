@@ -252,7 +252,15 @@ export async function saveDivergenceRegister(campaignId: string, register: Diver
 
 export async function loadDivergenceRegister(campaignId: string): Promise<DivergenceRegister> {
     const res = await fetch(`${API}/campaigns/${campaignId}/divergence`);
-    if (!res.ok) return { entries: [], prunedLog: [], lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 1 };
+    if (!res.ok) return { entries: [], chapterToggles: {}, categoryToggles: {}, lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 2 };
     const data = await res.json();
-    return { ...data, prunedLog: data.prunedLog ?? [] };
+    return { ...data, chapterToggles: data.chapterToggles ?? {}, categoryToggles: data.categoryToggles ?? {} };
+}
+
+export async function saveChapters(campaignId: string, chapters: ArchiveChapter[]): Promise<void> {
+    await fetch(`${API}/campaigns/${campaignId}/archive/chapters`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(chapters),
+    });
 }

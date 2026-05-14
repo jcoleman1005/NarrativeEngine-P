@@ -91,7 +91,7 @@ export async function runTurn(
 
     // ─── Context Gathering (parallel: archive, timeline, recommender, lore, pinned chapters) ───
     const {
-        sceneNumber, archiveRecall, recommendedNPCNames, timelineEvents, relevantLore, inventoryCategories, profileFields, deepContextSummary,
+        sceneNumber, archiveRecall, recommendedNPCNames, timelineEvents, relevantLore, inventoryCategories, profileFields, deepContextSummary, semanticFactText,
     } = await gatherContext(state, finalInput, {
         chapters: state.chapters,
         pinnedChapterIds: state.pinnedChapterIds,
@@ -116,7 +116,7 @@ export async function runTurn(
         archiveRecall,
         sceneNumber,
         recommendedNPCNames,
-        undefined,
+        semanticFactText,
         archiveIndex,
         timelineEvents,
         inventoryCategories as (import('../types').InventoryItemCategory | 'equipped')[] | undefined,

@@ -4,16 +4,17 @@ import { useAppStore } from '../../store/useAppStore';
 import { api } from '../../services/apiClient';
 import { ChapterCard } from './ChapterCard';
 import { ResolvedStatePanel } from './ResolvedStatePanel';
-import { generateChapterSummary } from '../../services/saveFileEngine';
+import { runCombinedSeal } from '../../services/postTurnPipeline';
 import { toast } from '../Toast';
 import type { ArchiveChapter } from '../../types';
 
 export const ChapterTab: React.FC = () => {
     const {
         chapters, setChapters, activeCampaignId,
-        context, getActiveSummarizerEndpoint,
+        getActiveSummarizerEndpoint,
         timeline, setTimeline, removeTimelineEvent,
         pinnedChapterIds, pinChapter,
+        messages, archiveIndex, loreChunks, npcLedger, getFreshProvider,
     } = useAppStore();
     
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -42,8 +43,7 @@ export const ChapterTab: React.FC = () => {
             if (result) {
                 await refreshChapters();
                 toast.success('Chapter sealed');
-                // Trigger summary generation for the sealed chapter
-                generateSummaryAsync(result.sealedChapter);
+                regenerateChapter(result.sealedChapter, true);
             }
         } catch (err) {
             console.error(err);
@@ -53,9 +53,9 @@ export const ChapterTab: React.FC = () => {
         }
     }, [activeCampaignId, refreshChapters]);
 
-    const generateSummaryAsync = useCallback(async (chapter: ArchiveChapter) => {
+    const regenerateChapter = useCallback(async (chapter: ArchiveChapter, setSealedAt: boolean = false) => {
         if (!activeCampaignId) return;
-        
+
         setIsRegenerating(chapter.chapterId);
         try {
             const provider = getActiveSummarizerEndpoint();
@@ -64,43 +64,37 @@ export const ChapterTab: React.FC = () => {
                 return;
             }
 
-            // 1. Fetch scenes for this chapter
-            const startNum = parseInt(chapter.sceneRange[0], 10);
-            const endNum = parseInt(chapter.sceneRange[1], 10);
-            const sceneIds = [];
-            for (let i = startNum; i <= endNum; i++) {
-                sceneIds.push(String(i).padStart(3, '0'));
-            }
-
-            const scenes = await api.archive.fetchScenes(activeCampaignId, sceneIds);
-            
-            // 2. Generate summary via LLM
-            const summaryPatch = await generateChapterSummary(
-                provider, 
-                chapter, 
-                scenes, 
-                context.headerIndex
+            const state = useAppStore.getState();
+            await runCombinedSeal(
+                provider,
+                chapter,
+                activeCampaignId,
+                {
+                    ...state,
+                    getFreshProvider: () => getActiveSummarizerEndpoint(),
+                    getMessages: () => messages,
+                    getFreshContext: () => state.context,
+                    archiveIndex,
+                    loreChunks,
+                    npcLedger: npcLedger ?? [],
+                    settings: state.settings,
+                    setChapters,
+                } as any,
+                {
+                    setDivergenceRegister: useAppStore.getState().setDivergenceRegister,
+                } as any,
+                setSealedAt,
             );
-            
-            if (!summaryPatch) {
-                throw new Error('Summary generation returned null');
-            }
-
-            // 3. Persist to server
-            await api.chapters.update(activeCampaignId, chapter.chapterId, {
-                ...summaryPatch,
-                invalidated: false,
-            });
 
             await refreshChapters();
-            toast.success(`Summary generated for ${chapter.title}`);
+            toast.success(`Chapter regenerated: ${chapter.title}`);
         } catch (err) {
             console.error(err);
-            toast.error(`Failed to generate summary for ${chapter.title}`);
+            toast.error(`Failed to regenerate chapter ${chapter.title}`);
         } finally {
             setIsRegenerating(prev => prev === chapter.chapterId ? null : prev);
         }
-    }, [activeCampaignId, refreshChapters, context.headerIndex, getActiveSummarizerEndpoint]);
+    }, [activeCampaignId, refreshChapters, getActiveSummarizerEndpoint]);
 
     const handleRename = useCallback(async (chapterId: string, newTitle: string) => {
         if (!activeCampaignId) return;
@@ -115,14 +109,13 @@ export const ChapterTab: React.FC = () => {
             if (merged) {
                 await refreshChapters();
                 toast.success('Chapters merged');
-                // Auto-trigger repair since it's now invalidated
-                generateSummaryAsync(merged);
+                regenerateChapter(merged, false);
             }
         } catch (err) {
             console.error(err);
             toast.error('Failed to merge chapters');
         }
-    }, [activeCampaignId, refreshChapters, generateSummaryAsync]);
+    }, [activeCampaignId, refreshChapters, regenerateChapter]);
 
     const handleSplit = useCallback(async (chapterId: string, atSceneId: string) => {
         if (!activeCampaignId) return;
@@ -131,15 +124,14 @@ export const ChapterTab: React.FC = () => {
             if (result) {
                 await refreshChapters();
                 toast.success('Chapter split');
-                // Trigger repair for both new halves
-                generateSummaryAsync(result.chapterA);
-                generateSummaryAsync(result.chapterB);
+                regenerateChapter(result.chapterA, false);
+                regenerateChapter(result.chapterB, false);
             }
         } catch (err) {
             console.error(err);
             toast.error('Failed to split chapter');
         }
-    }, [activeCampaignId, refreshChapters, generateSummaryAsync]);
+    }, [activeCampaignId, refreshChapters, regenerateChapter]);
 
     const handleDeleteTimelineEvent = useCallback(async (eventId: string) => {
         if (!activeCampaignId) return;
@@ -215,7 +207,7 @@ export const ChapterTab: React.FC = () => {
                                     expanded={expandedId === ch.chapterId}
                                     onToggle={() => setExpandedId(expandedId === ch.chapterId ? null : ch.chapterId)}
                                     onSeal={handleSeal}
-                                    onRegenerate={() => generateSummaryAsync(ch)}
+                                    onRegenerate={() => regenerateChapter(ch, false)}
                                     onRename={(title) => handleRename(ch.chapterId, title)}
                                     onSplit={(sceneId) => handleSplit(ch.chapterId, sceneId)}
                                     isNextAdjacent={isNextAdjacent}

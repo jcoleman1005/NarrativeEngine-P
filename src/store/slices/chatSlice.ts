@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand';
-import type { ArchiveIndexEntry, ChatMessage, CondenserState, GameContext, DivergenceRegister, DivergenceEntry, PrunedEntry } from '../../types';
+import type { ArchiveIndexEntry, ChatMessage, CondenserState, GameContext, DivergenceRegister, DivergenceEntry, DivergenceCategory } from '../../types';
 import { safeSceneNum } from '../../utils/helpers';
 
 const MAX_PRUNED_LOG = 100;
@@ -13,6 +13,7 @@ export type ChatSlice = {
     updateLastAssistant: (content: string) => void;
     updateLastMessage: (patch: Partial<ChatMessage>) => void;
     updateMessageContent: (id: string, content: string) => void;
+    replaceMessageText: (messageId: string, oldText: string, newText: string) => void;
     deleteMessage: (id: string) => void;
     deleteMessagesFrom: (id: string) => void;
     setStreaming: (v: boolean) => void;
@@ -27,12 +28,14 @@ export type ChatSlice = {
 
     divergenceRegister: DivergenceRegister;
     setDivergenceRegister: (register: DivergenceRegister) => void;
-    editDivergenceEntry: (id: string, patch: Partial<DivergenceEntry>) => void;
-    updateMessageDivergence: (messageId: string, divergenceIds: string[]) => void;
-    resetDivergenceRegister: () => void;
+    toggleDivergenceChapter: (chapterId: string, on: boolean) => void;
+    toggleDivergenceCategory: (chapterId: string, category: DivergenceCategory, on: boolean) => void;
+    pinDivergenceFact: (entryId: string) => void;
+    editDivergenceFact: (entryId: string, text: string) => void;
+    deleteDivergenceFact: (entryId: string) => void;
+    addDivergenceEntry: (entry: DivergenceEntry) => void;
+    dismissDivergenceReviewFlag: (entryId: string) => void;
     confirmReviewEntry: (id: string) => void;
-    deleteReviewedEntry: (id: string) => void;
-    restorePrunedEntry: (prunedIndex: number) => void;
 };
 
 // ── Cross-slice dependencies ───────────────────────────────────────────
@@ -40,7 +43,6 @@ export type ChatSlice = {
 type ChatDeps = ChatSlice & {
     activeCampaignId: string | null;
     context: GameContext;
-    // archiveIndex lives in CampaignSlice but clearArchive touches it
     archiveIndex: ArchiveIndexEntry[];
 };
 
@@ -55,13 +57,11 @@ export const createChatSlice: StateCreator<ChatDeps, [], [], ChatSlice> = (set) 
     },
     setCondensed: (summary, upToIndex) =>
         set((s) => {
-            // Guard: never overwrite a real summary with empty string
             const safeSummary = summary || s.condenser.condensedSummary;
             const newCondenser = { ...s.condenser, condensedSummary: safeSummary, condensedUpToIndex: upToIndex };
             debouncedSaveCampaignState();
             return { condenser: newCondenser };
         }),
-    // isCondensing is ephemeral — intentionally not persisted. App.tsx hydration resets it to false on load.
     setCondensing: (v) =>
         set((s) => ({ condenser: { ...s.condenser, isCondensing: v } })),
     resetCondenser: () =>
@@ -76,72 +76,72 @@ export const createChatSlice: StateCreator<ChatDeps, [], [], ChatSlice> = (set) 
             return { condenser: state };
         }),
 
-    divergenceRegister: { entries: [], prunedLog: [], lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 1 },
+    divergenceRegister: { entries: [], chapterToggles: {}, categoryToggles: {}, lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 2 },
     setDivergenceRegister: (register) =>
         set((_s) => {
             debouncedSaveCampaignState();
             return { divergenceRegister: register };
         }),
-    editDivergenceEntry: (id, patch) =>
+    toggleDivergenceChapter: (chapterId, on) =>
         set((s) => {
-            const entries = s.divergenceRegister.entries.map(e => {
-                if (e.id !== id) return e;
-                const updated = { ...e, ...patch };
-                const fieldsChanged = patch.category !== undefined || patch.subject !== undefined || patch.divergence !== undefined || patch.sceneRef !== undefined;
-                if (fieldsChanged && updated.parseError) updated.parseError = false;
-                return updated;
-            });
+            const chapterToggles = { ...s.divergenceRegister.chapterToggles, [chapterId]: on };
+            debouncedSaveCampaignState();
+            return { divergenceRegister: { ...s.divergenceRegister, chapterToggles, lastUpdatedAt: Date.now() } };
+        }),
+    toggleDivergenceCategory: (chapterId, category, on) => {
+        set((s) => {
+            const existing = s.divergenceRegister.categoryToggles[chapterId] ?? {};
+            const categoryToggles = {
+                ...s.divergenceRegister.categoryToggles,
+                [chapterId]: { ...existing, [category]: on },
+            };
+            debouncedSaveCampaignState();
+            return { divergenceRegister: { ...s.divergenceRegister, categoryToggles, lastUpdatedAt: Date.now() } };
+        });
+    },
+    pinDivergenceFact: (entryId) =>
+        set((s) => {
+            const entries = s.divergenceRegister.entries.map(e =>
+                e.id === entryId ? { ...e, pinned: !e.pinned } : e
+            );
             debouncedSaveCampaignState();
             return { divergenceRegister: { ...s.divergenceRegister, entries, lastUpdatedAt: Date.now() } };
         }),
-    updateMessageDivergence: (messageId, divergenceIds) =>
+    editDivergenceFact: (entryId, text) =>
         set((s) => {
-            const msgs = s.messages.map(m =>
-                m.id === messageId ? { ...m, divergenceIds } : m
+            const entries = s.divergenceRegister.entries.map(e =>
+                e.id === entryId ? { ...e, text, source: 'manual' as const } : e
             );
-            return { messages: msgs };
-        }),
-    resetDivergenceRegister: () =>
-        set(() => {
-            const newDivReg: DivergenceRegister = { entries: [], prunedLog: [], lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 1 };
             debouncedSaveCampaignState();
-            return { divergenceRegister: newDivReg };
+            return { divergenceRegister: { ...s.divergenceRegister, entries, lastUpdatedAt: Date.now() } };
+        }),
+    deleteDivergenceFact: (entryId) =>
+        set((s) => {
+            const entries = s.divergenceRegister.entries.filter(e => e.id !== entryId);
+            debouncedSaveCampaignState();
+            return { divergenceRegister: { ...s.divergenceRegister, entries, lastUpdatedAt: Date.now() } };
+        }),
+    addDivergenceEntry: (entry) =>
+        set((s) => {
+            const entries = [...s.divergenceRegister.entries, entry];
+            debouncedSaveCampaignState();
+            return { divergenceRegister: { ...s.divergenceRegister, entries, lastUpdatedAt: Date.now() } };
+        }),
+    dismissDivergenceReviewFlag: (entryId) =>
+        set((s) => {
+            const entries = s.divergenceRegister.entries.map(e =>
+                e.id === entryId ? { ...e, reviewFlag: undefined, unrecognizedNpcNames: undefined } : e
+            );
+            debouncedSaveCampaignState();
+            return { divergenceRegister: { ...s.divergenceRegister, entries, lastUpdatedAt: Date.now() } };
         }),
     confirmReviewEntry: (id) =>
         set((s) => {
             const entries = s.divergenceRegister.entries.map(e =>
-                e.id === id ? { ...e, reviewFlag: false } : e
+                e.id === id ? { ...e, reviewFlag: undefined, unrecognizedNpcNames: undefined } : e
             );
             debouncedSaveCampaignState();
             return { divergenceRegister: { ...s.divergenceRegister, entries, lastUpdatedAt: Date.now() } };
-        }),
-    deleteReviewedEntry: (id) =>
-        set((s) => {
-            const entry = s.divergenceRegister.entries.find(e => e.id === id);
-            if (!entry) return {};
-            const entries = s.divergenceRegister.entries.filter(e => e.id !== id);
-            const newPruned: PrunedEntry = {
-                originalEntry: entry,
-                prunedAt: Date.now(),
-                chapterId: '',
-                verdict: 'user_deleted_review',
-                reason: 'User manually deleted after review',
-            };
-            const prunedLog = [...(s.divergenceRegister.prunedLog ?? []), newPruned].slice(-MAX_PRUNED_LOG);
-            debouncedSaveCampaignState();
-            return { divergenceRegister: { ...s.divergenceRegister, entries, prunedLog, lastUpdatedAt: Date.now() } };
-        }),
-    restorePrunedEntry: (prunedIndex) =>
-        set((s) => {
-            const prunedLog = s.divergenceRegister.prunedLog ?? [];
-            if (prunedIndex < 0 || prunedIndex >= prunedLog.length) return {};
-            const restored = prunedLog[prunedIndex];
-            const entry: DivergenceEntry = { ...restored.originalEntry, reviewFlag: false };
-            const newLog = prunedLog.filter((_, i) => i !== prunedIndex);
-            const entries = [...s.divergenceRegister.entries, entry];
-            entries.sort((a, b) => safeSceneNum(a.sceneRef) - safeSceneNum(b.sceneRef));
-            debouncedSaveCampaignState();
-            return { divergenceRegister: { ...s.divergenceRegister, entries, prunedLog: newLog, lastUpdatedAt: Date.now() } };
         }),
 
     // Chat defaults
@@ -175,6 +175,18 @@ export const createChatSlice: StateCreator<ChatDeps, [], [], ChatSlice> = (set) 
             debouncedSaveCampaignState();
             return { messages: msgs };
         }),
+    replaceMessageText: (messageId, oldText, newText) =>
+        set((s) => {
+            const msgs = s.messages.map(msg => {
+                if (msg.id !== messageId) return msg;
+                const content = typeof msg.content === 'string'
+                    ? msg.content.replace(oldText, newText)
+                    : msg.content;
+                return { ...msg, content };
+            });
+            debouncedSaveCampaignState();
+            return { messages: msgs };
+        }),
     deleteMessage: (id) =>
         set((s) => {
             const msgs = s.messages.filter(m => m.id !== id);
@@ -192,7 +204,7 @@ export const createChatSlice: StateCreator<ChatDeps, [], [], ChatSlice> = (set) 
     setStreaming: (v) => set({ isStreaming: v } as Partial<ChatDeps>),
     clearChat: () => set((_s) => {
         const newCondenser = { condensedSummary: '', condensedUpToIndex: -1, isCondensing: false };
-        const newDivReg = { entries: [], prunedLog: [], lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 1 };
+        const newDivReg = { entries: [], chapterToggles: {}, categoryToggles: {}, lastUpdatedSceneId: '', lastUpdatedAt: 0, version: 2 };
         debouncedSaveCampaignState();
         return { messages: [], condenser: newCondenser, divergenceRegister: newDivReg, context: { ..._s.context, notebook: [] } } as Partial<ChatDeps>;
     }),

@@ -1,17 +1,19 @@
 import { useState } from 'react';
-import { ScrollText, Database, Sparkles, Save, BookOpen } from 'lucide-react';
+import { ScrollText, Database, Sparkles, Save, BookOpen, Brain } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { RulesTab } from './context-drawer/RulesTab';
 import { LoreTab } from './context-drawer/LoreTab';
 import { EnginesTab } from './context-drawer/EnginesTab';
 import { BookkeepingTab } from './context-drawer/BookkeepingTab';
 import { ChapterTab } from './context-drawer/ChapterTab';
+import { MemoryTab } from './context-drawer/MemoryTab';
 
 const TABS = [
     { key: 'sys'   as const, Icon: ScrollText, label: 'System Context' },
     { key: 'world' as const, Icon: Database,   label: 'World Info' },
     { key: 'eng'   as const, Icon: Sparkles,   label: 'Engine Tuning' },
     { key: 'chpt'  as const, Icon: BookOpen,   label: 'Chapters' },
+    { key: 'mem'   as const, Icon: Brain,      label: 'Memory' },
     { key: 'book'  as const, Icon: Save,       label: 'Bookkeeping' },
 ];
 
@@ -73,6 +75,7 @@ export function ContextDrawer() {
                     {activeTab === 'world' && <LoreTab />}
                     {activeTab === 'eng' && <EnginesTab />}
                     {activeTab === 'chpt' && <ChapterTab />}
+                    {activeTab === 'mem' && <MemoryTab />}
                     {activeTab === 'book' && <BookkeepingTab />}
                 </div>
             </aside>

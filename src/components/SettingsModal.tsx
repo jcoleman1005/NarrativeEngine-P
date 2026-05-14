@@ -532,6 +532,39 @@ export function SettingsModal() {
                                     <span>4000</span>
                                 </div>
                             </div>
+                            <div>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label className="text-[10px] text-text-dim uppercase tracking-wider">
+                                        Scan Budget (per batch)
+                                    </label>
+                                    <span className="text-amber-500 font-bold font-mono bg-amber-500/10 px-2 py-0.5 rounded text-[10px]">
+                                        {(() => {
+                                            const v = settings.divergenceScanBudget ?? 0;
+                                            if (v === 0) {
+                                                const ctx = settings.contextLimit ?? 4096;
+                                                return `Auto (${Math.round(ctx * 0.75)})`;
+                                            }
+                                            return v;
+                                        })()}
+                                    </span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={settings.contextLimit ?? 4096}
+                                    step={500}
+                                    value={settings.divergenceScanBudget ?? 0}
+                                    onChange={(e) => updateSettings({ divergenceScanBudget: parseInt(e.target.value) })}
+                                    className="w-full h-1.5 bg-border rounded-lg appearance-none cursor-pointer accent-amber-500"
+                                />
+                                <div className="flex justify-between text-[8px] text-text-dim mt-0.5">
+                                    <span>Auto (0)</span>
+                                    <span>{settings.contextLimit ?? 4096}</span>
+                                </div>
+                                <p className="text-[8px] text-text-dim mt-1 leading-tight">
+                                    Max tokens per batch for scanning chapters. 0 = auto (75% of context limit).
+                                </p>
+                            </div>
                         </div>
 
                         {/* Auto-Trim (Auto-Condense) */}
@@ -588,6 +621,45 @@ export function SettingsModal() {
                                         return 'Balanced — condenses at 75% budget threshold.';
                                     })()}
                                 </p>
+                            </div>
+                        </div>
+
+                        {/* Auto-Archive Stale NPCs */}
+                        <div className="bg-void p-3 border border-border rounded space-y-2">
+                            <div>
+                                <label className="block text-[11px] text-text-primary uppercase tracking-wider font-bold mb-1">
+                                    Auto-Archive Stale NPCs
+                                </label>
+                                <p className="text-[9px] text-text-dim max-w-[240px] leading-tight">
+                                    Archive NPCs not mentioned for N turns. 0 = never auto-archive.
+                                </p>
+                            </div>
+                            <div>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label className="text-[10px] text-text-dim uppercase tracking-wider">
+                                        Turns before archive
+                                    </label>
+                                    <span className="text-terminal font-bold font-mono bg-terminal/10 px-2 py-0.5 rounded text-[10px]">
+                                        {(() => {
+                                            const v = settings.autoArchiveStaleNPCsTurns ?? 0;
+                                            return v === 0 ? 'Off' : `${v} turns`;
+                                        })()}
+                                    </span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="50"
+                                    step="5"
+                                    value={settings.autoArchiveStaleNPCsTurns ?? 0}
+                                    onChange={(e) => updateSettings({ autoArchiveStaleNPCsTurns: parseInt(e.target.value, 10) })}
+                                    className="w-full h-1.5 bg-border rounded-lg appearance-none cursor-pointer accent-terminal"
+                                />
+                                <div className="flex justify-between text-[8px] text-text-dim mt-0.5">
+                                    <span>Off (0)</span>
+                                    <span>25</span>
+                                    <span>50</span>
+                                </div>
                             </div>
                         </div>
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles, Plus } from 'lucide-react';
 import { useAppStore, DEFAULT_SURPRISE_TYPES, DEFAULT_SURPRISE_TONES, DEFAULT_ENCOUNTER_TYPES, DEFAULT_ENCOUNTER_TONES, DEFAULT_WORLD_WHO, DEFAULT_WORLD_WHERE, DEFAULT_WORLD_WHY, DEFAULT_WORLD_WHAT } from '../../store/useAppStore';
 import { populateEngineTags } from '../../services/chatEngine';
 import { Toggle } from './Toggle';
@@ -8,6 +8,7 @@ import { NPCPressureInspector } from '../NPCPressureInspector';
 export function EnginesTab() {
     const context = useAppStore((s) => s.context);
     const updateContext = useAppStore((s) => s.updateContext);
+    const openDivergenceEntry = useAppStore((s) => s.openDivergenceEntry);
     const [populatingField, setPopulatingField] = useState<string | null>(null);
 
     const renderPopulateButton = (fieldKey: string, onPopulate: () => Promise<void>) => (
@@ -345,6 +346,13 @@ export function EnginesTab() {
             </div>
 
             <NPCPressureInspector />
+
+            <button
+                onClick={() => openDivergenceEntry()}
+                className="w-full flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-widest text-amber-400 border border-amber-500/30 rounded py-2 hover:bg-amber-500/10 transition-colors"
+            >
+                <Plus size={12} /> Add Campaign Fact
+            </button>
         </div>
     );
 }

@@ -164,7 +164,7 @@ export function buildPayload(
     archiveRecall?: ArchiveScene[],
     sceneNumber?: string,
     recommendedNPCNames?: string[],
-    _semanticFactText?: string,
+    semanticFactText?: string,
     archiveIndex?: ArchiveIndexEntry[],
     timelineEvents?: TimelineEvent[],
     inventoryCategories?: (InventoryItemCategory | 'equipped')[],
@@ -394,6 +394,10 @@ export function buildPayload(
         if (regText) {
             worldBlocks.push({ source: 'Established Facts', content: regText, tokens: countTokens(regText), reason: `Campaign facts (${divergenceRegister.entries.length} entries)` });
         }
+    }
+
+    if (semanticFactText) {
+        worldBlocks.push({ source: 'Semantic Facts', content: semanticFactText, tokens: countTokens(semanticFactText), reason: 'Injected verified facts' });
     }
 
     // --- 4. Budget & Trim World Context ---
