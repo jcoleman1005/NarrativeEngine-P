@@ -50,6 +50,7 @@ export function MessageBubble({
             className={`group flex animate-[msg-in_0.2s_ease-out] ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
             <div
+                {...(msg.role === 'assistant' ? { 'data-lore-checkable': 'true', 'data-message-id': msg.id } : {})}
                 className={`max-w-[95%] md:max-w-[75%] px-3 md:px-4 py-2 md:py-3 text-sm font-mono leading-relaxed relative ${msg.role === 'user'
                     ? 'bg-terminal/8 border-l-2 border-terminal text-text-primary'
                     : msg.role === 'system'

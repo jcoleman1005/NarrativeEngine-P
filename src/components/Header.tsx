@@ -1,4 +1,5 @@
-import { Settings, PanelLeftOpen, PanelLeftClose, Trash2, LogOut, Users, Archive, Save, ScanSearch } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Settings, PanelLeftOpen, PanelLeftClose, Trash2, LogOut, Users, Archive, Save, ScanSearch, BookCheck } from 'lucide-react';
 import { createBackup } from '../store/campaignStore';
 import { flushAllPendingSaves } from '../store/slices/campaignSlice';
 import { toast } from './Toast';
@@ -6,6 +7,14 @@ import { useAppStore } from '../store/useAppStore';
 import { TokenGauge } from './TokenGauge';
 import { saveCampaignState } from '../store/campaignStore';
 import { API_BASE as API } from '../lib/apiBase';
+
+type LoreSelectionSnapshot = {
+    messageId: string;
+    text: string;
+    start: number;
+    end: number;
+    bubbleText: string;
+};
 
 export function Header() {
     const {
@@ -26,6 +35,47 @@ export function Header() {
     const deepArmed = useAppStore(s => s.deepArmed);
     const toggleDeepArmed = useAppStore(s => s.toggleDeepArmed);
     const settings = useAppStore(s => s.settings);
+    const openLoreCheck = useAppStore(s => s.openLoreCheck);
+
+    const [loreSel, setLoreSel] = useState<LoreSelectionSnapshot | null>(null);
+
+    const captureSelection = (): LoreSelectionSnapshot | null => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+        const range = sel.getRangeAt(0);
+        const node = range.commonAncestorContainer;
+        const el = (node.nodeType === 1 ? node as Element : node.parentElement);
+        const bubble = el?.closest('[data-lore-checkable="true"]') as HTMLElement | null;
+        if (!bubble) return null;
+        const messageId = bubble.dataset.messageId;
+        const text = sel.toString().trim();
+        if (!messageId || text.length < 3) return null;
+        const bubbleText = bubble.textContent ?? '';
+        const start = bubbleText.indexOf(text);
+        if (start === -1) return null;
+        return { messageId, text, start, end: start + text.length, bubbleText };
+    };
+
+    useEffect(() => {
+        const handle = () => setLoreSel(captureSelection());
+        document.addEventListener('selectionchange', handle);
+        return () => document.removeEventListener('selectionchange', handle);
+    }, []);
+
+    const handleLoreCheck = (e: React.MouseEvent | React.TouchEvent) => {
+        e.preventDefault();
+        const snap = captureSelection() ?? loreSel;
+        if (!snap) return;
+        const before = snap.bubbleText.slice(Math.max(0, snap.start - 200), snap.start);
+        const after = snap.bubbleText.slice(snap.end, Math.min(snap.bubbleText.length, snap.end + 200));
+        openLoreCheck({
+            messageId: snap.messageId, selectedText: snap.text,
+            start: snap.start, end: snap.end,
+            surroundingContext: `${before}[[HIGHLIGHTED]]${snap.text}[[/HIGHLIGHTED]]${after}`,
+        });
+        window.getSelection()?.removeAllRanges();
+        setLoreSel(null);
+    };
 
     const handleExit = async () => {
         if (activeCampaignId) {
@@ -125,6 +175,15 @@ export function Header() {
                     <ScanSearch size={18} />
                 </button>
             )}
+
+            <button
+                onMouseDown={handleLoreCheck}
+                className={`transition-colors p-1 ${loreSel ? 'text-terminal animate-pulse' : 'text-text-dim hover:text-terminal'}`}
+                title="Lore Check selection (highlight text in a GM message first)"
+                aria-label="Lore Check selection"
+            >
+                <BookCheck size={16} />
+            </button>
 
             <button
                 onClick={toggleSettings}
