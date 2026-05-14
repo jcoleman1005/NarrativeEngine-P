@@ -44,6 +44,7 @@ export type TurnState = {
     getFreshProvider: () => EndpointConfig | ProviderConfig | undefined;
     getUtilityEndpoint?: () => EndpointConfig | undefined;
     getFreshAuxiliaryProvider?: () => EndpointConfig | undefined;
+    onStageNpcIds?: string[];
     timeline?: TimelineEvent[];
     // Phase 2B: store-lifted fields (eliminate useAppStore.getState() inside runTurn)
     chapters: ArchiveChapter[];
@@ -125,6 +126,7 @@ export async function runTurn(
         deepContextSummary,
         state.divergenceRegister,
         state.chapters,
+        state.onStageNpcIds,
     );
 
     const payload = payloadResult.messages;

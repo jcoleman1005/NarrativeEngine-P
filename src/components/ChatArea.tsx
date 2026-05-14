@@ -189,6 +189,11 @@ export function ChatArea() {
             sampling: storeSnapshot.getActivePreset()?.sampling,
             deepSearchThisTurn: useDeepSearch,
             divergenceRegister: storeSnapshot.divergenceRegister,
+            onStageNpcIds: storeSnapshot.onStageNpcIds,
+            getFreshAuxiliaryProvider: () => {
+                const aux = useAppStore.getState().getActiveAuxiliaryEndpoint();
+                return aux?.modelName ? aux : useAppStore.getState().getActiveStoryEndpoint();
+            },
         }, {
             onCheckingNotes: setIsCheckingNotes,
             addMessage: storeSnapshot.addMessage,

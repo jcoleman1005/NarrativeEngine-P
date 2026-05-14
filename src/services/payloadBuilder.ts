@@ -171,7 +171,8 @@ export function buildPayload(
     profileFields?: string[],
     deepContextSummary?: string,
     divergenceRegister?: DivergenceRegister,
-    chapters?: ArchiveChapter[]
+    chapters?: ArchiveChapter[],
+    onStageNpcIds?: string[]
 ): { messages: OpenAIMessage[]; trace?: PayloadTrace[]; debugSections?: DebugSection[] } {
     const trace: PayloadTrace[] = [];
     const debugSections: DebugSection[] = [];
@@ -248,7 +249,7 @@ export function buildPayload(
             .filter(m => m.role === 'assistant' && typeof m.content === 'string' && m.content.length > 20)
             .map(m => m.content as string);
 
-        const filteredRecall = archiveRecall.filter(scene => {
+        let filteredRecall = archiveRecall.filter(scene => {
             if (activeAssistantContents.some(asst => scene.content.includes(asst))) return false;
             if (condensedSummary && scene.content.length > 100) {
                 const slug = scene.content.slice(0, 100).toLowerCase();
@@ -256,6 +257,26 @@ export function buildPayload(
             }
             return true;
         });
+
+        // Perceptual archive filtering: only include scenes witnessed by active NPCs
+        if (archiveIndex && npcLedger && archiveIndex.some(e => e.witnesses && e.witnesses.length > 0)) {
+            const activeNpcIds = new Set(
+                npcLedger.filter(n => !n.archived).map(n => n.id)
+            );
+            if (onStageNpcIds) {
+                for (const id of onStageNpcIds) activeNpcIds.add(id);
+            }
+            const sceneWitnessMap = new Map(archiveIndex.map(e => [e.sceneId, e.witnesses]));
+            filteredRecall = filteredRecall.filter(scene => {
+                const witnesses = sceneWitnessMap.get(scene.sceneId);
+                if (!witnesses || witnesses.length === 0) return true; // broadcast — no witness data
+                return witnesses.some(w => activeNpcIds.has(w));
+            });
+            if (isDebug) {
+                const filtered = archiveRecall.length - filteredRecall.length;
+                if (filtered > 0) addTrace({ source: 'Archive Recall', tokens: 0, text: `Perceptual filter removed ${filtered} scenes (not witnessed by active NPCs)` });
+            }
+        }
 
         if (filteredRecall.length > 0) {
             const text = `[ARCHIVE RECALL — VERBATIM PAST SCENES]\n${filteredRecall.map(s => `[SCENE #${s.sceneId}]\n${s.content}`).join('\n\n')}\n[END ARCHIVE RECALL]`;
