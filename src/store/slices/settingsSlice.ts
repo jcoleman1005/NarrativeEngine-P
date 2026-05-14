@@ -72,7 +72,8 @@ export const defaultPreset: AIPreset = {
         apiKey: '',
         modelName: 'llama3',
     },
-    utilityAI: { endpoint: '', apiKey: '', modelName: '' }
+    utilityAI: { endpoint: '', apiKey: '', modelName: '' },
+    auxiliaryAI: { endpoint: '', apiKey: '', modelName: '' }
 };
 
 export const defaultSettings: AppSettings = {
@@ -147,7 +148,8 @@ export function migrateSettings(data: Record<string, unknown>): AppSettings {
             modelName: (raw.imageApiModel as string) || '',
         },
         summarizerAI: { ...migratedStoryProvider },
-        utilityAI: { endpoint: '', apiKey: '', modelName: '' }
+        utilityAI: { endpoint: '', apiKey: '', modelName: '' },
+        auxiliaryAI: { endpoint: '', apiKey: '', modelName: '' }
     };
 
     return {
@@ -215,6 +217,7 @@ export type SettingsSlice = {
     getActiveImageEndpoint: () => EndpointConfig | undefined;
     getActiveSummarizerEndpoint: () => EndpointConfig | undefined;
     getActiveUtilityEndpoint: () => EndpointConfig | undefined;
+    getActiveAuxiliaryEndpoint: () => EndpointConfig | undefined;
 };
 
 // ── Slice creator ──────────────────────────────────────────────────────
@@ -337,6 +340,11 @@ export const createSettingsSlice: StateCreator<SettingsSlice & { activeCampaignI
     getActiveUtilityEndpoint: () => {
         const preset = get().getActivePreset();
         return preset?.utilityAI;
+    },
+
+    getActiveAuxiliaryEndpoint: () => {
+        const preset = get().getActivePreset();
+        return preset?.auxiliaryAI;
     },
 
     // ── Vault methods ──────────────────────────────────────────────────────

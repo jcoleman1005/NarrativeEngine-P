@@ -12,7 +12,7 @@ import { getEmbeddingStatus, runBackfill } from '../services/backfillRunner';
 export function SettingsModal() {
     const { settings, updateSettings, settingsOpen, toggleSettings, addPreset, updatePreset, removePreset } = useAppStore();
     const [activeTab, setActiveTab] = useState(settings.presets[0]?.id || '');
-    const [testingSection, setTestingSection] = useState<'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI' | null>(null);
+    const [testingSection, setTestingSection] = useState<'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI' | 'auxiliaryAI' | null>(null);
     const [testResults, setTestResults] = useState<Record<string, { ok: boolean; detail: string } | null>>({});
 
     const [expanded, setExpanded] = useState<Record<string, boolean>>({
@@ -20,6 +20,7 @@ export function SettingsModal() {
         imageAI: false,
         summarizerAI: false,
         utilityAI: false,
+        auxiliaryAI: false,
     });
 
     const [reindexing, setReindexing] = useState(false);
@@ -58,7 +59,7 @@ export function SettingsModal() {
 
     const activePreset = settings.presets.find((p) => p.id === activeTab) || settings.presets[0];
 
-    const handleTest = async (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI') => {
+    const handleTest = async (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI' | 'auxiliaryAI') => {
         if (!activePreset) return;
         const config = activePreset[section];
         if (!config || !config.endpoint) return;
@@ -82,7 +83,8 @@ export function SettingsModal() {
             storyAI: { endpoint: 'http://localhost:11434/v1', apiKey: '', modelName: 'llama3', apiFormat: 'openai' },
             imageAI: { endpoint: '', apiKey: '', modelName: '' },
             summarizerAI: { endpoint: 'http://localhost:11434/v1', apiKey: '', modelName: 'llama3', apiFormat: 'openai' },
-            utilityAI: { endpoint: '', apiKey: '', modelName: '' }
+            utilityAI: { endpoint: '', apiKey: '', modelName: '' },
+            auxiliaryAI: { endpoint: '', apiKey: '', modelName: '' }
         };
         addPreset(newPreset);
         setActiveTab(newPreset.id);
@@ -102,13 +104,13 @@ export function SettingsModal() {
         updatePreset(activePreset.id, { name });
     };
 
-    const handleUpdateEndpoint = (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI', field: keyof EndpointConfig, value: string) => {
+    const handleUpdateEndpoint = (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI' | 'auxiliaryAI', field: keyof EndpointConfig, value: string) => {
         if (!activePreset) return;
         const updatedConfig = { ...activePreset[section], [field]: value };
         updatePreset(activePreset.id, { [section]: updatedConfig });
     };
 
-    const handleApiFormatChange = (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI', newFormat: ApiFormat) => {
+    const handleApiFormatChange = (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI' | 'auxiliaryAI', newFormat: ApiFormat) => {
         if (!activePreset) return;
         const config = activePreset[section] ?? { endpoint: '', apiKey: '', modelName: '' };
         let endpoint = (config.endpoint || '').replace(/\/+$/, '');
@@ -127,7 +129,7 @@ export function SettingsModal() {
         updatePreset(activePreset.id, { [section]: { ...config, apiFormat: newFormat, endpoint } });
     };
 
-    const handleEndpointBlur = (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI', endpoint: string) => {
+    const handleEndpointBlur = (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI' | 'auxiliaryAI', endpoint: string) => {
         if (!activePreset || !endpoint) return;
         const detected = detectFormatFromEndpoint(endpoint);
         if (!detected) return;
@@ -150,7 +152,7 @@ export function SettingsModal() {
         updatePreset(activePreset.id, { sampling });
     };
 
-    const renderEndpointConfig = (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI', title: string) => {
+    const renderEndpointConfig = (section: 'storyAI' | 'imageAI' | 'summarizerAI' | 'utilityAI' | 'auxiliaryAI', title: string) => {
         const config = activePreset[section] ?? { endpoint: '', apiKey: '', modelName: '', apiFormat: 'openai' as ApiFormat };
         const isExpanded = expanded[section];
         const isTesting = testingSection === section;
@@ -370,6 +372,7 @@ export function SettingsModal() {
                             {renderEndpointConfig('summarizerAI', 'Summarizer & Context AI')}
                             {renderEndpointConfig('imageAI', 'Image Generation AI')}
                             {renderEndpointConfig('utilityAI', 'Utility AI (Context Recommender)')}
+                            {renderEndpointConfig('auxiliaryAI', 'Auxiliary AI (NPC Classification)')}
 
                             <SamplingPanel preset={activePreset} onUpdate={handleUpdateSampling} />
                         </div>

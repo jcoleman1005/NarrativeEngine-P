@@ -43,6 +43,7 @@ export type TurnState = {
     getMessages: () => ChatMessage[]; // to get fresh messages midway
     getFreshProvider: () => EndpointConfig | ProviderConfig | undefined;
     getUtilityEndpoint?: () => EndpointConfig | undefined;
+    getFreshAuxiliaryProvider?: () => EndpointConfig | undefined;
     timeline?: TimelineEvent[];
     // Phase 2B: store-lifted fields (eliminate useAppStore.getState() inside runTurn)
     chapters: ArchiveChapter[];

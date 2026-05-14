@@ -94,6 +94,7 @@ export type AIPreset = {
     imageAI: EndpointConfig;
     summarizerAI: EndpointConfig;
     utilityAI?: EndpointConfig;
+    auxiliaryAI?: EndpointConfig;
     sampling?: SamplingConfig;
 };
 
