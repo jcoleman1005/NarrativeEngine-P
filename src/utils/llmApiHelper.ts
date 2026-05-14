@@ -197,10 +197,11 @@ export function buildChatBody(
 
     if (format === 'claude') {
         const { system, messages: convMessages } = transformClaudeMessages(messages);
+        const maxTokens = options?.sampling?.max_tokens ?? options?.max_tokens ?? 16384;
         const body: Record<string, unknown> = {
             model: provider.modelName,
             messages: convMessages,
-            max_tokens: options?.max_tokens ?? 8192,
+            max_tokens: maxTokens,
             stream,
         };
         if (system) body.system = system;
@@ -229,7 +230,7 @@ export function buildChatBody(
         if (systemInstruction) body.systemInstruction = systemInstruction;
 
         const genConfig: Record<string, unknown> = {};
-        genConfig.maxOutputTokens = options?.max_tokens ?? 8192;
+        genConfig.maxOutputTokens = options?.sampling?.max_tokens ?? options?.max_tokens ?? 8192;
         if (options?.temperature !== undefined) genConfig.temperature = options.temperature;
         else if (options?.sampling?.temperature !== undefined) genConfig.temperature = options.sampling.temperature;
         if (options?.sampling?.top_p !== undefined) genConfig.topP = options.sampling.top_p;
@@ -260,7 +261,8 @@ export function buildChatBody(
         stream,
     };
 
-    if (options?.max_tokens !== undefined) body.max_tokens = options.max_tokens;
+    if (options?.sampling?.max_tokens !== undefined) body.max_tokens = options.sampling.max_tokens;
+    else if (options?.max_tokens !== undefined) body.max_tokens = options.max_tokens;
 
     if (options?.temperature !== undefined) body.temperature = options.temperature;
     else if (options?.sampling?.temperature !== undefined) body.temperature = options.sampling.temperature;

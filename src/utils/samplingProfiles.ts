@@ -83,6 +83,7 @@ export const SAMPLING_FIELDS: {
     step: number;
     cloud: boolean;
 }[] = [
+    { key: 'max_tokens', label: 'Max Tokens', min: 1024, max: 65536, step: 1024, cloud: true },
     { key: 'temperature', label: 'Temperature', min: 0, max: 2, step: 0.05, cloud: true },
     { key: 'top_p', label: 'Top P', min: 0, max: 1, step: 0.01, cloud: true },
     { key: 'top_k', label: 'Top K', min: 0, max: 200, step: 1, cloud: false },

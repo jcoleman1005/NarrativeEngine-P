@@ -84,6 +84,7 @@ export type SamplingConfig = {
     dry_multiplier?: number;
     dry_base?: number;
     dry_allowed_length?: number;
+    max_tokens?: number;
 };
 
 export type AIPreset = {

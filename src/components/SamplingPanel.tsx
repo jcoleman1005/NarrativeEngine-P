@@ -83,6 +83,7 @@ export function SamplingPanel({ preset, onUpdate }: Props) {
                                 max={field.max}
                                 step={field.step}
                                 onChange={(v) => handleFieldChange(field.key, v)}
+                                formatValue={field.key === 'max_tokens' ? formatTokenValue : undefined}
                             />
                         ))}
                     </div>
@@ -106,6 +107,7 @@ export function SamplingPanel({ preset, onUpdate }: Props) {
                                         max={field.max}
                                         step={field.step}
                                         onChange={(v) => handleFieldChange(field.key, v)}
+                                        formatValue={field.key === 'max_tokens' ? formatTokenValue : undefined}
                                     />
                                 ))}
                             </div>
@@ -125,6 +127,13 @@ export function SamplingPanel({ preset, onUpdate }: Props) {
     );
 }
 
+function formatTokenValue(v: number | undefined): string {
+    if (v === undefined) return '';
+    if (v >= 1048576) return `${(v / 1048576).toFixed(v % 1048576 === 0 ? 0 : 1)}M`;
+    if (v >= 1024) return `${(v / 1024).toFixed(v % 1024 === 0 ? 0 : 1)}K`;
+    return String(v);
+}
+
 function SliderRow({
     label,
     value,
@@ -132,6 +141,7 @@ function SliderRow({
     max,
     step,
     onChange,
+    formatValue,
 }: {
     label: string;
     value: number | undefined;
@@ -139,8 +149,10 @@ function SliderRow({
     max: number;
     step: number;
     onChange: (v: number | undefined) => void;
+    formatValue?: (v: number | undefined) => string;
 }) {
     const currentValue = value ?? min;
+    const displayValue = formatValue ? formatValue(value) : (value !== undefined ? String(value) : '');
 
     return (
         <div className="flex items-center gap-3">
@@ -154,6 +166,9 @@ function SliderRow({
                 onChange={(e) => onChange(parseFloat(e.target.value))}
                 className="flex-1 accent-terminal cursor-pointer h-1"
             />
+            <span className="w-16 text-[11px] text-text-primary font-mono text-center">
+                {displayValue}
+            </span>
             <input
                 type="number"
                 min={min}
