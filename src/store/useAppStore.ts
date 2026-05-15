@@ -5,6 +5,7 @@ import { createCampaignSlice, type CampaignSlice } from './slices/campaignSlice'
 import { createChatSlice, type ChatSlice } from './slices/chatSlice';
 import { createUISlice, type UISlice } from './slices/uiSlice';
 import { createMapSlice, type MapSlice } from './slices/mapSlice';
+import { createWorldLoreSlice, type WorldLoreSlice } from './slices/worldLoreSlice';
 
 // Re-export DEFAULT_* constants for backward compatibility
 export {
@@ -20,7 +21,7 @@ export {
 
 // ── Combined store type ────────────────────────────────────────────────
 
-type AppState = SettingsSlice & CampaignSlice & ChatSlice & UISlice & MapSlice;
+type AppState = SettingsSlice & CampaignSlice & ChatSlice & UISlice & MapSlice & WorldLoreSlice;
 
 // ── Store ──────────────────────────────────────────────────────────────
 
@@ -30,4 +31,5 @@ export const useAppStore = create<AppState>()((...a) => ({
     ...createChatSlice(...a),
     ...createUISlice(...a),
     ...createMapSlice(...a),
+    ...createWorldLoreSlice(...a),
 }));

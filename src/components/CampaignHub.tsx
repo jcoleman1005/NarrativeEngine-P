@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Settings, Upload, Loader2 } from 'lucide-react';
+import { Settings, Upload, Loader2, BookPlus } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import {
     listCampaigns, deleteCampaign, saveCampaign,
@@ -14,6 +14,7 @@ import { CampaignFormModal } from './CampaignFormModal';
 import { CoverflowCarousel } from './CoverflowCarousel';
 import { Backdrop } from './primitives/Backdrop';
 import { GhostBtn, DangerBtn } from './primitives/Buttons';
+import { WorldLoreModal } from './WorldLoreModal';
 
 export function CampaignHub() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -178,6 +179,31 @@ export function CampaignHub() {
                 <Settings size={15} />
             </button>
 
+            {/* World Lore button */}
+            <button
+                onClick={() => useAppStore.getState().toggleWorldLoreModal()}
+                title="Create World Lore"
+                style={{
+                    position: 'absolute', top: 20, right: 64,
+                    width: 36, height: 36, borderRadius: '50%',
+                    border: '1px solid rgba(106,159,212,0.25)',
+                    background: 'rgba(255,255,255,0.04)',
+                    color: 'rgba(107,107,107,0.5)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', zIndex: 10, transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => {
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(106,159,212,0.65)';
+                    (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-terminal)';
+                }}
+                onMouseLeave={e => {
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(106,159,212,0.25)';
+                    (e.currentTarget as HTMLButtonElement).style.color = 'rgba(107,107,107,0.5)';
+                }}
+            >
+                <BookPlus size={15} />
+            </button>
+
             {/* Hero text */}
             <div style={{ textAlign: 'center', marginBottom: 44, position: 'relative', zIndex: 2 }}>
                 <div style={{
@@ -265,6 +291,9 @@ export function CampaignHub() {
                     onClose={() => setModalOpen(false)}
                 />
             )}
+
+            {/* ── World Lore Modal ── */}
+            <WorldLoreModal />
         </div>
     );
 }

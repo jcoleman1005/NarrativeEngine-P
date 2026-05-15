@@ -338,6 +338,33 @@ export type LoreChunk = {
     groupWeight?: number;
 };
 
+export type WorldLoreItem = {
+    id: string;
+    title: string;
+    body: string;
+};
+
+export type WorldLoreDraft = {
+    id: string;
+    name: string;
+    background: string;
+    languages: string;
+    powerSystem: string;
+    techEconomy: string;
+    timeline: string;
+    toneBoundaries: string;
+    houseRules: string;
+    locations: WorldLoreItem[];
+    cultures: WorldLoreItem[];
+    factions: WorldLoreItem[];
+    threats: WorldLoreItem[];
+    npcs: WorldLoreItem[];
+    characterCreationQuestions: string;
+    rawSource?: string;
+    createdAt: number;
+    updatedAt: number;
+};
+
 export type EngineSeed = {
     surpriseTypes: string[];
     surpriseTones: string[];
