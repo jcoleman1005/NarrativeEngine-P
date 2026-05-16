@@ -212,7 +212,7 @@ export function SettingsModal() {
                             )}
                             {currentFormat === 'claude' && (
                                 <p className="text-[10px] text-text-dim mt-1">
-                                    <span className="font-mono">https://api.anthropic.com/v1</span> &middot; Uses <span className="font-mono">x-api-key</span> header
+                                    Get your key at <span className="font-mono">console.anthropic.com</span> &middot; Keys start with <span className="font-mono">sk-ant-</span>
                                 </p>
                             )}
                             {currentFormat === 'gemini' && (
@@ -251,7 +251,7 @@ export function SettingsModal() {
                                 type="password"
                                 value={config.apiKey}
                                 onChange={(e) => handleUpdateEndpoint(section, 'apiKey', e.target.value)}
-                                placeholder={currentFormat === 'gemini' ? 'AIza...' : 'sk-...'}
+                                placeholder={currentFormat === 'gemini' ? 'AIza...' : currentFormat === 'claude' ? 'sk-ant-...' : 'sk-...'}
                                 className="w-full bg-surface border border-border px-3 py-2 text-sm text-text-primary placeholder:text-text-dim/40 font-mono focus:border-terminal focus:outline-none"
                             />
                         </div>
