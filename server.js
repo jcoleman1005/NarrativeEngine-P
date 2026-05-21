@@ -14,6 +14,7 @@ import { createAssetsRouter } from './server/routes/assets.js';
 import { createOverworldRouter } from './server/routes/overworld.js';
 import { createTransferRouter } from './server/routes/transfer.js';
 import { createDivergenceRouter } from './server/routes/divergence.js';
+import { createSceneStateRouter } from './server/routes/sceneState.js';
 import { initDb } from './server/lib/vectorStore.js';
 import { warmup as warmupEmbedder } from './server/lib/embedder.js';
 
@@ -66,6 +67,7 @@ app.use(createAssetsRouter());
 app.use(createOverworldRouter());
 app.use(createTransferRouter());
 app.use(createDivergenceRouter());
+app.use(createSceneStateRouter(DATA_DIR));
 
 // ─── Anthropic Proxy ───
 app.post('/api/anthropic/v1/messages', async (req, res) => {
@@ -80,13 +82,34 @@ app.post('/api/anthropic/v1/messages', async (req, res) => {
             },
             body: JSON.stringify(req.body),
         });
+
         res.status(response.status);
-        response.headers.forEach((val, key) => res.setHeader(key, val));
-        response.body.pipeTo(new WritableStream({
-            write(chunk) { res.write(chunk); },
-            close() { res.end(); }
-        }));
+        response.headers.forEach((val, key) => {
+            if (key !== 'content-encoding' && key !== 'transfer-encoding') {
+                res.setHeader(key, val);
+            }
+        });
+
+        if (!response.body) {
+            res.end();
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const pump = async () => {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) { res.end(); break; }
+                res.write(Buffer.from(value));
+            }
+        };
+        pump().catch(err => {
+            console.error('[Anthropic Proxy] Stream error:', err.message);
+            res.end();
+        });
+
     } catch (err) {
+        console.error('[Anthropic Proxy] Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });

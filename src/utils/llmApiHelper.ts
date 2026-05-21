@@ -218,7 +218,13 @@ export function buildChatBody(
         if (options?.sampling?.top_p !== undefined) body.top_p = options.sampling.top_p;
         if (options?.sampling?.top_k !== undefined) body.top_k = options.sampling.top_k;
 
-        if (options?.tools && options.tools.length > 0) body.tools = options.tools;
+        if (options?.tools && options.tools.length > 0) {
+    body.tools = options.tools.map((t: any) => ({
+        name: t.function.name,
+        description: t.function.description,
+        input_schema: t.function.parameters,
+    }));
+}
         return body;
     }
 
