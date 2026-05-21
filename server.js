@@ -67,6 +67,46 @@ app.use(createOverworldRouter());
 app.use(createTransferRouter());
 app.use(createDivergenceRouter());
 
+// ─── Anthropic Proxy ───
+app.post('/api/anthropic/v1/messages', async (req, res) => {
+    try {
+        const apiKey = req.headers['x-api-key'] || '';
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify(req.body),
+        });
+        res.status(response.status);
+        response.headers.forEach((val, key) => res.setHeader(key, val));
+        response.body.pipeTo(new WritableStream({
+            write(chunk) { res.write(chunk); },
+            close() { res.end(); }
+        }));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/anthropic/v1/models', async (req, res) => {
+    try {
+        const apiKey = req.headers['x-api-key'] || '';
+        const response = await fetch('https://api.anthropic.com/v1/models', {
+            headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+            },
+        });
+        const data = await response.json();
+        res.status(response.status).json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ─── Central Error Handler ───
 app.use((err, _req, res, _next) => {
     const status = err.statusCode || 500;
