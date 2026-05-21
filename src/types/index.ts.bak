@@ -335,8 +335,6 @@ export type LoreChunk = {
     summary?: string;
     group?: string;
     groupWeight?: number;
-    scene_id?: string;
-    scope?: 'scene' | 'chapter' | 'global';
 };
 
 export type WorldLoreItem = {

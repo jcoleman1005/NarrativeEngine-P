@@ -91,21 +91,9 @@ export async function gatherContext(
     let semanticArchiveIds: string[] | undefined;
     let semanticLoreIds: string[] | undefined;
 
-    const timelinePromise = activeCampaignId
-        ? fetch(`${API}/campaigns/${activeCampaignId}/archive/next-scene`, { signal })
-            .then(async res => {
-                if (res.ok) {
-                    const snData = await res.json();
-                    sceneNumber = snData.sceneId;
-                    console.log(`[Scene Engine] Pre-assigned scene #${sceneNumber}`);
-                }
-            }).catch(() => { /* ignored */ })
-        : Promise.resolve();
-
     // ─── Semantic Candidate Pre-filter ───
     const semanticPromise = activeCampaignId
         ? (async () => {
-            await timelinePromise; // Ensure sceneNumber is resolved for filtering
             try {
                 // Query expansion for callback phrases or short queries
                 let queries = [input];
@@ -120,10 +108,7 @@ export async function gatherContext(
                     }
                 }
 
-                const queryBody = queries.length > 1 
-                    ? { queries, scene_id: sceneNumber } 
-                    : { query: input, scene_id: sceneNumber };
-
+                const queryBody = queries.length > 1 ? { queries } : { query: input };
                 const [archiveRes, loreRes] = await Promise.all([
                     fetch(`${API}/campaigns/${activeCampaignId}/archive/semantic-candidates`, {
                         method: 'POST',
@@ -181,6 +166,17 @@ export async function gatherContext(
                 console.warn('[ContextGatherer] Semantic candidates fetch failed:', err);
             }
         })()
+        : Promise.resolve();
+
+    const timelinePromise = activeCampaignId
+        ? fetch(`${API}/campaigns/${activeCampaignId}/archive/next-scene`, { signal })
+            .then(async res => {
+                if (res.ok) {
+                    const snData = await res.json();
+                    sceneNumber = snData.sceneId;
+                    console.log(`[Scene Engine] Pre-assigned scene #${sceneNumber}`);
+                }
+            }).catch(() => { /* ignored */ })
         : Promise.resolve();
 
     // ─── Phase 4A: Two-Stage Chapter Funnel Retrieval ───
@@ -280,7 +276,7 @@ export async function gatherContext(
     const lorePromise = (async () => {
         await semanticPromise;
         return loreChunks.length > 0
-            ? retrieveRelevantLore(loreChunks, context.canonState, context.headerIndex, input, 1200, messages, semanticLoreIds, sceneNumber)
+            ? retrieveRelevantLore(loreChunks, context.canonState, context.headerIndex, input, 1200, messages, semanticLoreIds)
             : undefined;
     })();
 

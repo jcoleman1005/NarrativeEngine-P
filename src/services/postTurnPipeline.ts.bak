@@ -12,11 +12,8 @@ import { scanPressure, buildPressurePatch, shouldArchiveNPC, findArchivedToResto
 import { scanCharacterProfile } from './characterProfileParser';
 import { scanInventory } from './inventoryParser';
 import { toast } from '../components/Toast';
-import { mergeSealEntries, EMPTY_REGISTER, coerceCategory } from './divergenceRegister';
+import { mergeSealEntries, EMPTY_REGISTER } from './divergenceRegister';
 import { saveDivergenceRegister } from '../store/campaignStore';
-import { callLLM } from './callLLM';
-import { extractJson } from './payloadBuilder';
-import { uid } from '../utils/uid';
 
 const PRESENT_HEADER_RE = /👥\s*\[Present\]\s*(.+)/i;
 
@@ -57,7 +54,6 @@ export async function runPostTurnPipeline(
         runArchiveTrack(state, callbacks, displayInput, lastAssistantContent, allMsgs, activeCampaignId),
         runNPCTrack(state, callbacks, lastAssistantContent, allMsgs, npcLedger, activeCampaignId),
         runPressureTrack(state, callbacks, displayInput, npcLedger, activeCampaignId, lastAssistantContent),
-        runAtomicDeltaTrack(state, callbacks, lastAssistantContent),
     ]);
 
     // ── On-Stage NPC Tracking ──
@@ -73,102 +69,6 @@ export async function runPostTurnPipeline(
         if (r.status === 'rejected') {
             console.warn('[PostTurn] Track failed:', r.reason);
         }
-    }
-}
-
-async function runAtomicDeltaTrack(
-    state: TurnState,
-    callbacks: TurnCallbacks,
-    lastAssistantContent: string
-): Promise<void> {
-    const provider = state.getFreshProvider();
-    if (!provider) return;
-
-    const extractionPrompt = `You are a scene state extractor. Read the following GM narrative turn and return ONLY a JSON object with no preamble, no markdown, no explanation.
-
-Extract any changes to the current scene state:
-
-{
-  "npcs_arrived": [],        // NPC names who entered the scene this turn
-  "npcs_departed": [],       // NPC names who left the scene this turn  
-  "npc_state_changes": [],   // e.g. ["Aldric: now unconscious", "Barmaid: fled"]
-  "location_change": null,   // new location name if the player moved, else null
-  "environmental_changes": [], // e.g. ["fire started", "door locked"]
-  "new_facts": [             // Subject-Predicate-Object triples for the Divergence Register
-    { "s": "", "p": "", "o": "" }
-  ],
-  "active_flags": []         // new boolean scene flags established this turn
-}
-
-If nothing changed for a field, return an empty array or null. Do not invent changes not present in the text.
-
-GM turn text:
-${lastAssistantContent}`;
-
-    try {
-        const raw = await callLLM(provider, extractionPrompt, { priority: 'low', maxTokens: 800 });
-        const cleaned = extractJson(raw);
-        const delta = JSON.parse(cleaned);
-
-        // Atomic write-back
-        const context = state.getFreshContext();
-        const notebook = [...(context.notebook || [])];
-        const timestamp = Date.now();
-
-        // 1. Patch Scene Notebook
-        if (delta.npcs_arrived?.length) {
-            delta.npcs_arrived.forEach((name: string) => notebook.push({ id: uid(), text: `[NPC] ${name} arrived`, timestamp }));
-        }
-        if (delta.npcs_departed?.length) {
-            delta.npcs_departed.forEach((name: string) => {
-                // Remove existing presence/arrival notes for this NPC
-                const idx = notebook.findIndex(n => n.text.toLowerCase().includes(name.toLowerCase()) && (n.text.includes('[NPC]') || n.text.includes('arrived')));
-                if (idx !== -1) notebook.splice(idx, 1);
-                notebook.push({ id: uid(), text: `[NPC] ${name} departed`, timestamp });
-            });
-        }
-        if (delta.npc_state_changes?.length) {
-            delta.npc_state_changes.forEach((change: string) => notebook.push({ id: uid(), text: `[NPC STATE] ${change}`, timestamp }));
-        }
-        if (delta.location_change) {
-            notebook.push({ id: uid(), text: `[LOCATION] Moved to ${delta.location_change}`, timestamp });
-        }
-        if (delta.environmental_changes?.length) {
-            delta.environmental_changes.forEach((env: string) => notebook.push({ id: uid(), text: `[ENV] ${env}`, timestamp }));
-        }
-        if (delta.active_flags?.length) {
-            delta.active_flags.forEach((flag: string) => notebook.push({ id: uid(), text: `[FLAG] ${flag}`, timestamp }));
-        }
-
-        // Apply notebook updates
-        callbacks.updateContext({ notebook: notebook.slice(-50) }); // Keep last 50
-
-        // 2. Patch Divergence Register
-        if (delta.new_facts?.length) {
-            const currentSceneId = state.archiveIndex.length > 0 
-                ? state.archiveIndex[state.archiveIndex.length - 1].sceneId 
-                : '000';
-            
-            const newEntries = delta.new_facts.map((f: any) => ({
-                id: `div_${uid()}`,
-                chapterId: 'current',
-                category: coerceCategory('misc'),
-                text: `${f.s} ${f.p} ${f.o}`,
-                sceneRef: currentSceneId,
-                npcIds: [],
-                pinned: false,
-                source: 'auto-delta' as const
-            }));
-
-            const liveRegister = useAppStore.getState().divergenceRegister ?? EMPTY_REGISTER;
-            const merged = mergeSealEntries(liveRegister, newEntries, currentSceneId);
-            callbacks.setDivergenceRegister?.(merged);
-            await saveDivergenceRegister(state.activeCampaignId!, merged);
-        }
-
-    } catch (err) {
-        console.warn('[PostTurn] Atomic delta extraction failed (non-fatal):', err);
-        // TODO: A retry or fallback would improve reliability
     }
 }
 

@@ -63,10 +63,6 @@ function categoryBoost(category: string, scanText: string): number {
     return 0;
 }
 
-// ─── Scoring Constants ───────────────────────────────────────────────────
-const SCENE_LOCALITY_BOOST = 20;
-const GLOBAL_SCOPE_BOOST = 5;
-
 // ─── Main Retrieval (Semantic-First) ──────────────────────────────────────
 export function retrieveRelevantLore(
     chunks: LoreChunk[],
@@ -76,7 +72,6 @@ export function retrieveRelevantLore(
     tokenBudget = 1200,
     recentMessages?: ChatMessage[],
     semanticCandidateIds?: string[],
-    activeSceneId?: string
 ): LoreChunk[] {
     if (chunks.length === 0) return [];
 
@@ -119,19 +114,16 @@ export function retrieveRelevantLore(
 
         const kwHits = countKeywordHits(keywords, scanText);
 
-        if (isSemantic || kwHits > 0) {
-            let score = isSemantic ? 15 : 0;
+        if (isSemantic) {
+            let score = 15;
             score += kwHits * 10;
-            score += isSemantic ? (chunk.priority || 5) : Math.floor((chunk.priority || 5) * 0.5);
+            score += (chunk.priority || 5);
             score += categoryBoost(chunk.category, scanText);
-
-            // Gap 3: Locality Boost
-            if (activeSceneId && chunk.scene_id === activeSceneId) {
-                score += SCENE_LOCALITY_BOOST;
-            } else if (chunk.scope === 'global') {
-                score += GLOBAL_SCOPE_BOOST;
-            }
-
+            scored.push({ chunk, score });
+        } else if (kwHits > 0) {
+            let score = kwHits * 10;
+            score += Math.floor((chunk.priority || 5) * 0.5);
+            score += categoryBoost(chunk.category, scanText);
             scored.push({ chunk, score });
         }
     }
